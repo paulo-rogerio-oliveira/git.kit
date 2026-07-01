@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<title>git.kit — Manual do Usuário</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", Arial, sans-serif;
+    color: #1f2933;
+    font-size: 11.5pt;
+    line-height: 1.5;
+    margin: 0;
+  }
+  h1, h2, h3 { color: #14315c; line-height: 1.25; }
+  h1 { font-size: 26pt; margin: 0 0 4px; }
+  h2 {
+    font-size: 16pt;
+    margin: 26px 0 8px;
+    border-bottom: 2px solid #d8e1ee;
+    padding-bottom: 4px;
+    page-break-after: avoid;
+  }
+  h3 { font-size: 12.5pt; margin: 16px 0 4px; page-break-after: avoid; }
+  p { margin: 6px 0; }
+  ul, ol { margin: 6px 0 6px 0; padding-left: 22px; }
+  li { margin: 3px 0; }
+  code {
+    font-family: Consolas, "Courier New", monospace;
+    background: #eef2f7;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 10pt;
+  }
+  pre {
+    background: #1e1e1e;
+    color: #dcdcdc;
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-family: Consolas, monospace;
+    font-size: 9.5pt;
+    overflow-x: auto;
+    white-space: pre-wrap;
+  }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 10.5pt; }
+  th, td { border: 1px solid #cbd5e1; padding: 6px 9px; text-align: left; vertical-align: top; }
+  th { background: #eef2f7; color: #14315c; }
+  .cover {
+    text-align: center;
+    padding-top: 70mm;
+    page-break-after: always;
+  }
+  .cover .logo { font-size: 46pt; font-weight: 700; color: #14315c; letter-spacing: -1px; }
+  .cover .sub { font-size: 15pt; color: #475569; margin-top: 8px; }
+  .cover .meta { margin-top: 40px; font-size: 11pt; color: #64748b; }
+  .callout {
+    border-left: 4px solid #2563eb;
+    background: #eff5ff;
+    padding: 8px 12px;
+    margin: 10px 0;
+    border-radius: 0 6px 6px 0;
+  }
+  .callout.warn { border-left-color: #d97706; background: #fff7ed; }
+  .callout.tip  { border-left-color: #059669; background: #ecfdf5; }
+  .callout b { color: #14315c; }
+  .step {
+    background: #14315c;
+    color: #fff;
+    border-radius: 50%;
+    width: 22px; height: 22px;
+    display: inline-block;
+    text-align: center;
+    line-height: 22px;
+    font-weight: 700;
+    font-size: 11pt;
+    margin-right: 6px;
+  }
+  .toc li { margin: 5px 0; }
+  .section { page-break-inside: avoid; }
+  footer { margin-top: 30px; color: #94a3b8; font-size: 9pt; border-top: 1px solid #e2e8f0; padding-top: 6px; }
+  figure { margin: 12px 0; page-break-inside: avoid; text-align: center; }
+  figure img { max-width: 100%; border: 1px solid #cbd5e1; border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,0.12); }
+  figcaption { font-size: 9.5pt; color: #64748b; margin-top: 5px; font-style: italic; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="logo">git.kit</div>
+  <div class="sub">Replicação de commits entre branches</div>
+  <div class="sub" style="font-size:13pt;margin-top:24px;">Manual do Usuário</div>
+  <div class="meta">
+    Aplicativo Windows (WPF / .NET)<br/>
+    Versão do manual: 1.0
+  </div>
+</div>
+
+<h1>Manual do Usuário</h1>
+<p>Este manual descreve como usar o <b>git.kit</b> para replicar um commit de um branch
+em outro, resolver conflitos com o TortoiseGitMerge e publicar o resultado.</p>
+
+<h2>Sumário</h2>
+<ol class="toc">
+  <li>O que é o git.kit</li>
+  <li>Pré-requisitos</li>
+  <li>Visão geral da tela principal</li>
+  <li>Passo a passo da replicação</li>
+  <li>Estratégias de replicação</li>
+  <li>Branch de destino e criação automática</li>
+  <li>Resolução de conflitos</li>
+  <li>Envio via push</li>
+  <li>Situações especiais e mensagens</li>
+  <li>Perguntas frequentes (FAQ)</li>
+  <li>Glossário</li>
+</ol>
+
+<div class="section">
+<h2>1. O que é o git.kit</h2>
+<p>O <b>git.kit</b> é um aplicativo desktop (Windows, WPF) que automatiza a tarefa de
+<b>levar um commit específico de um branch para outro</b> dentro de um repositório git.
+Ele sempre trabalha sobre uma <b>cópia temporária</b> do repositório, de modo que o seu
+projeto de trabalho <b>não é alterado</b> (não troca de branch nem modifica arquivos).</p>
+<p>Principais recursos:</p>
+<ul>
+  <li>Clonar a partir de uma <b>URL</b> ou abrir a partir de um <b>caminho local</b>.</li>
+  <li>Escolher o <b>branch de origem</b> e o <b>branch de destino</b> (existente ou novo).</li>
+  <li>Replicar via <b>cherry-pick</b> ou <b>integração de diff</b>.</li>
+  <li>Resolver conflitos em um <b>formulário dedicado</b> usando o <b>TortoiseGitMerge</b>.</li>
+  <li>Concluir a replicação e <b>enviar (push)</b> o branch para o remote.</li>
+</ul>
+</div>
+
+<div class="section">
+<h2>2. Pré-requisitos</h2>
+<table>
+  <tr><th>Item</th><th>Necessário para</th></tr>
+  <tr><td><b>git</b> instalado e no <code>PATH</code></td><td>Todas as operações (o app usa a linha de comando do git).</td></tr>
+  <tr><td><b>TortoiseGit</b> (com TortoiseGitMerge)</td><td>Resolução manual de conflitos. Opcional se nunca houver conflito.</td></tr>
+  <tr><td>Acesso ao <b>remote</b> (credenciais/SSH)</td><td>Apenas para o passo de push.</td></tr>
+</table>
+<div class="callout tip"><b>Dica:</b> se o TortoiseGit não for encontrado automaticamente, o app
+pedirá para você localizar o executável (<code>TortoiseGitProc.exe</code> ou
+<code>TortoiseGitMerge.exe</code>) na primeira vez que precisar dele.</div>
+</div>
+
+<div class="section">
+<h2>3. Visão geral da tela principal</h2>
+<figure>
+  <img src="images/tela-principal.png" alt="Tela principal do git.kit" />
+  <figcaption>Tela principal: repositório, branches/estratégia, lista de commits e log de comandos.</figcaption>
+</figure>
+<p>A janela principal é dividida em blocos numerados:</p>
+<table>
+  <tr><th>Bloco</th><th>Função</th></tr>
+  <tr><td><b>1. Repositório</b></td><td>Campo "URL ou caminho" e botão <b>Iniciar</b>. Mostra o local da cópia (Local:) e o remote (Remote:).</td></tr>
+  <tr><td><b>2. Branches e commit</b></td><td>Branch de origem, branch de destino (editável) e a estratégia de replicação.</td></tr>
+  <tr><td><b>3. Commit a replicar</b></td><td>Lista de commits do branch de origem (com filtro) e os botões de ação.</td></tr>
+  <tr><td><b>Log de comandos git</b></td><td>Mostra cada comando git executado e sua saída (também gravado em arquivo de log).</td></tr>
+  <tr><td><b>Barra de status</b></td><td>Mensagem do passo atual e indicador de progresso.</td></tr>
+</table>
+</div>
+
+<div class="section">
+<h2>4. Passo a passo da replicação</h2>
+
+<h3><span class="step">1</span> Informar o repositório</h3>
+<p>No campo <b>URL ou caminho</b>, informe uma das opções e clique em <b>Iniciar</b>:</p>
+<ul>
+  <li><b>URL</b> (https/ssh): o repositório é clonado em uma <b>pasta de trabalho</b> de
+      caminho curto (<code>C:\gtk\&lt;n&gt;</code>).</li>
+  <li><b>Caminho local</b> de um repositório git: ele é validado e <b>clonado para a pasta
+      de trabalho</b> — assim o seu repositório original não troca de branch nem é alterado.</li>
+</ul>
+<p>Em ambos os casos, os <b>branches são carregados automaticamente</b>.</p>
+<div class="callout tip"><b>Dica:</b> as pastas de trabalho de execuções anteriores são
+<b>limpas automaticamente em segundo plano</b> quando o app abre; a cópia da sessão atual
+nunca é removida. O histórico de comandos git também é gravado em
+<code>%LOCALAPPDATA%\git.kit\logs</code> (um arquivo por sessão).</div>
+<p>Use os campos de <b>filtro</b> acima da lista de branches de origem e acima do grid de
+commits para localizar rapidamente o que precisa (por nome, hash, autor ou mensagem).</p>
+
+<h3><span class="step">2</span> Escolher origem e destino</h3>
+<ul>
+  <li><b>Branch de origem:</b> selecione o branch que contém o commit a replicar. Os commits
+      são carregados automaticamente na lista.</li>
+  <li><b>Branch de destino:</b> selecione um branch existente <b>ou digite um nome novo</b>
+      (campo editável). Veja a seção 6 sobre criação automática.</li>
+</ul>
+
+<h3><span class="step">3</span> Escolher a estratégia</h3>
+<p>Selecione <b>Cherry-pick</b> ou <b>Integração de diff</b> (ver seção 5).</p>
+
+<h3><span class="step">4</span> Selecionar o commit e replicar</h3>
+<p>Na lista, clique no commit desejado e então em <b>Replicar commit</b>. O resultado pode ser:</p>
+<table>
+  <tr><th>Resultado</th><th>O que significa</th></tr>
+  <tr><td><b>Sucesso</b></td><td>O commit foi aplicado e commitado automaticamente. Já é possível fazer o push.</td></tr>
+  <tr><td><b>Nada a replicar</b></td><td>As mudanças já existem no destino. Nada a fazer.</td></tr>
+  <tr><td><b>Conflitos</b></td><td>Abre o formulário de resolução de conflitos (ver seção 7).</td></tr>
+  <tr><td><b>Falha</b></td><td>Erro (ex.: árvore com alterações pendentes). A mensagem detalha o motivo.</td></tr>
+</table>
+
+<h3><span class="step">5</span> Enviar (push)</h3>
+<p>Após o sucesso, clique em <b>Enviar branch (push)</b> (ver seção 8).</p>
+</div>
+
+<div class="section">
+<h2>5. Estratégias de replicação</h2>
+<table>
+  <tr><th>Estratégia</th><th>Como funciona</th><th>Quando usar</th></tr>
+  <tr>
+    <td><b>Cherry-pick</b></td>
+    <td>Replica o commit com <code>git cherry-pick -x</code>, preservando autoria e mensagem.</td>
+    <td>Caso padrão — quando você quer "o mesmo commit" no outro branch.</td>
+  </tr>
+  <tr>
+    <td><b>Integração de diff</b></td>
+    <td>Gera o diff do commit e aplica com <code>git apply --3way</code>, criando um novo commit.</td>
+    <td>Quando quer apenas as diferenças aplicadas, sem vincular ao commit original.</td>
+  </tr>
+</table>
+</div>
+
+<div class="section">
+<h2>6. Branch de destino e criação automática</h2>
+<p>O campo de destino é <b>editável</b>. Se você digitar um nome que <b>não existe</b>, o
+git.kit cria o branch automaticamente, escolhendo a base pelo <b>sufixo do nome</b>:</p>
+<table>
+  <tr><th>Nome digitado</th><th>Base usada</th></tr>
+  <tr><td>Termina em <code>dev</code> (ex.: <code>feature/x-dev</code>)</td><td><b>develop</b></td></tr>
+  <tr><td>Qualquer outro (ex.: <code>feature/x</code>)</td><td><b>master</b> (com fallback para <code>main</code>)</td></tr>
+</table>
+<div class="callout"><b>Observação:</b> a base é procurada tanto entre os branches locais quanto
+remotos (<code>origin/...</code>), o que é importante logo após o clone.</div>
+</div>
+
+<div class="section">
+<h2>7. Resolução de conflitos</h2>
+<p>Quando o git não consegue aplicar o commit automaticamente, abre-se o
+<b>formulário de conflitos</b>, com um grid contendo:</p>
+<figure>
+  <img src="images/tela-conflitos.png" alt="Formulário de resolução de conflitos" />
+  <figcaption>Formulário de conflitos: cada arquivo com seu tipo, status (Resolvido/Pendente) e o botão Resolver.</figcaption>
+</figure>
+<table>
+  <tr><th>Coluna</th><th>Significado</th></tr>
+  <tr><td><b>Arquivo</b></td><td>Caminho do arquivo em conflito.</td></tr>
+  <tr><td><b>Tipo de conflito</b></td><td>Ex.: "Ambos modificaram", "Adicionado por ambos", "Excluído por eles".</td></tr>
+  <tr><td><b>Código</b></td><td>Código do git (<code>UU</code>, <code>AA</code>, <code>DU</code>…).</td></tr>
+  <tr><td><b>Status</b></td><td><b>Pendente</b> ou <b>Resolvido</b>.</td></tr>
+  <tr><td><b>Ação</b></td><td>Botão <b>Resolver</b> (abre o TortoiseGitMerge).</td></tr>
+</table>
+
+<h3>Fluxo de resolução</h3>
+<ol>
+  <li>Clique em <b>Resolver</b> na linha do arquivo. O <b>TortoiseGitMerge</b> abre mostrando
+      três painéis: <b>(base)</b>, <b>(destino)</b> e <b>(origem)</b>.</li>
+  <li>Combine as alterações desejadas, <b>salve</b> e <b>marque como resolvido</b> no TortoiseGit.</li>
+  <li>Volte ao formulário: o status é reavaliado automaticamente (ou clique em
+      <b>Atualizar status</b>). Arquivos resolvidos passam a <b>Resolvido</b>.</li>
+  <li>Quando todos estiverem resolvidos, clique em <b>Concluir replicação</b>. O app finaliza
+      o commit (<code>cherry-pick --continue</code> ou commit) e fecha o formulário.</li>
+</ol>
+
+<div class="callout warn"><b>Atenção:</b> para trazer a mudança que está sendo replicada,
+aceite/combine o lado <b>(origem)</b> no TortoiseGitMerge. Se você mantiver apenas o lado
+<b>(destino)</b>, o resultado fica idêntico ao destino e não haverá o que commitar
+(veja "commit vazio" na seção 9).</div>
+
+<div class="callout tip"><b>Dica:</b> marcar como resolvido no TortoiseGit apenas faz o
+<i>stage</i> (git add) — não cria o commit. É o botão <b>Concluir replicação</b> que finaliza.</div>
+</div>
+
+<div class="section">
+<h2>8. Envio via push</h2>
+<p>Após concluir a replicação, clique em <b>Enviar branch (push)</b>. Uma confirmação mostra
+o <b>remote de destino</b> antes do envio. O comando executado é
+<code>git push -u origin &lt;branch&gt;</code>.</p>
+<table>
+  <tr><th>Origem do repositório</th><th>Destino do push</th></tr>
+  <tr><td>Clone por <b>URL</b></td><td>O próprio remote real (origin).</td></tr>
+  <tr><td>Aberto por <b>caminho local</b></td><td>O <b>remote real do repositório de origem</b> (o app reaponta o origin para essa URL).</td></tr>
+</table>
+<div class="callout warn"><b>Atenção:</b> o push usa as credenciais/configuração de git da sua
+máquina. Se o remote exigir autenticação interativa e ela não estiver configurada
+(credential helper/SSH), o push falhará com uma mensagem explicativa em vez de travar.</div>
+</div>
+
+<div class="section">
+<h2>9. Situações especiais e mensagens</h2>
+
+<h3>"Nada a replicar" / commit vazio</h3>
+<p>Significa que o resultado é <b>idêntico ao branch de destino</b> — não há diferença para
+commitar. Causas comuns: o commit já estava aplicado, ou a resolução de conflito manteve o
+lado <b>destino</b>. Não é erro: o branch já reflete o estado desejado e <b>pode ser enviado
+(push)</b> normalmente.</p>
+
+<h3>"A árvore de trabalho possui alterações pendentes"</h3>
+<p>Ocorre se a cópia tiver mudanças não commitadas antes da replicação. Em uso normal a cópia
+é limpa; reinicie o processo (clique em <b>Iniciar</b> novamente) se necessário.</p>
+
+<h3>TortoiseGit não localizado</h3>
+<p>Ao precisar resolver um conflito, se o TortoiseGit não for encontrado, o app abre um seletor
+para você indicar o <code>TortoiseGitProc.exe</code> ou <code>TortoiseGitMerge.exe</code>. O
+caminho informado é reutilizado durante a sessão.</p>
+
+<h3>Conflitos ainda pendentes ao concluir</h3>
+<p>Se algum arquivo ainda contiver marcadores de conflito (<code>&lt;&lt;&lt;&lt;&lt;&lt;&lt;</code>),
+o app não conclui e avisa quais arquivos faltam resolver.</p>
+</div>
+
+<div class="section">
+<h2>10. Perguntas frequentes (FAQ)</h2>
+
+<p><b>O git.kit altera o meu repositório local?</b><br/>
+Não. Ele sempre clona para uma pasta temporária e trabalha nela. Seu repositório original não
+troca de branch nem tem arquivos modificados.</p>
+
+<p><b>Onde fica a cópia de trabalho?</b><br/>
+Em <code>%TEMP%\git.kit\&lt;nome&gt;-&lt;data&gt;-&lt;id&gt;</code>. O caminho aparece em "Local:" na tela.</p>
+
+<p><b>Resolvi o conflito mas diz que o commit ficou vazio. Por quê?</b><br/>
+Porque a resolução ficou igual ao destino. Reabra o conflito e combine o lado <b>(origem)</b>
+se a intenção era trazer aquela mudança.</p>
+
+<p><b>O push não envia minhas alterações ("Everything up-to-date").</b><br/>
+Garanta que concluiu a replicação (botão <b>Concluir replicação</b>) antes do push, e que o
+commit foi de fato criado (veja o Log de comandos).</p>
+
+<p><b>Posso replicar para um branch que ainda não existe?</b><br/>
+Sim. Digite o nome no campo de destino; ele é criado a partir de develop (sufixo
+<code>dev</code>) ou master.</p>
+</div>
+
+<div class="section">
+<h2>11. Glossário</h2>
+<table>
+  <tr><th>Termo</th><th>Significado</th></tr>
+  <tr><td><b>Cherry-pick</b></td><td>Aplicar em um branch um commit específico de outro.</td></tr>
+  <tr><td><b>Branch de origem</b></td><td>Branch que contém o commit a ser replicado.</td></tr>
+  <tr><td><b>Branch de destino</b></td><td>Branch que receberá o commit.</td></tr>
+  <tr><td><b>Conflito</b></td><td>Quando o git não consegue mesclar automaticamente as alterações.</td></tr>
+  <tr><td><b>Stage / git add</b></td><td>Marcar um arquivo como resolvido/pronto para commit.</td></tr>
+  <tr><td><b>Push</b></td><td>Enviar commits/branches locais para o repositório remoto.</td></tr>
+  <tr><td><b>Remote (origin)</b></td><td>Repositório remoto associado ao projeto.</td></tr>
+</table>
+</div>
+
+<footer>
+  git.kit — Manual do Usuário • Documento gerado para uso interno • As telas e mensagens podem
+  variar conforme a versão do aplicativo.
+</footer>
+
+</body>
+</html>

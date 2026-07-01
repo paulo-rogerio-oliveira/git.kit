@@ -1,0 +1,20 @@
+<Application x:Class="GitKit.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Application.Resources>
+        <ResourceDictionary>
+            <!-- Espaçamento padrão -->
+            <Thickness x:Key="Gap">0,0,0,8</Thickness>
+
+            <Style TargetType="Label">
+                <Setter Property="Padding" Value="0,0,0,2" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+            </Style>
+
+            <Style TargetType="Button">
+                <Setter Property="Padding" Value="12,4" />
+                <Setter Property="MinWidth" Value="90" />
+            </Style>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

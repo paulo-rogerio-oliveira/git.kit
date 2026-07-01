@@ -1,0 +1,126 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+**git.kit** is a Windows WPF desktop app (.NET 10, MVVM) that replicates a single commit
+from one branch to another inside a git repository, via **cherry-pick** or **diff
+integration**. When git cannot merge automatically, the user resolves conflicts in
+**TortoiseGitMerge**, then finishes the replication and optionally pushes.
+
+The codebase (comments, XML docs, UI strings, user manual) is written in **Portuguese** —
+match that language when editing existing code and user-facing text.
+
+## Commands
+
+```powershell
+dotnet build GitKit.slnx                                          # build everything
+dotnet test tests/GitKit.Core.Tests/GitKit.Core.Tests.csproj     # run all tests
+dotnet run --project src/GitKit.App/GitKit.App.csproj            # run the WPF app
+```
+
+Run a single test by name:
+
+```powershell
+dotnet test tests/GitKit.Core.Tests/GitKit.Core.Tests.csproj --filter "FullyQualifiedName~<TestMethodName>"
+```
+
+The app has a hidden mode used to regenerate manual screenshots: `--screenshots <dir>`
+(see `src/GitKit.App/Screenshots/ScreenshotGenerator.cs`, invoked from `App.xaml.cs`).
+
+## Prerequisites for running / testing
+
+- **.NET SDK 10** (WPF app targets `net10.0-windows`, so the app builds only on Windows).
+- **git** on `PATH` — every git operation shells out to the CLI. The test suite creates
+  and deletes real temporary git repositories, so tests need git installed.
+- **TortoiseGit** (optional) — only needed for manual conflict resolution at runtime.
+
+## Architecture
+
+Two projects plus tests, wired by manual DI (no container):
+
+- **`GitKit.Core`** (`net10.0`, no UI dependency) — all domain logic, fully testable
+  without WPF.
+- **`GitKit.App`** (`net10.0-windows`, WPF, `AssemblyName = GitKit`) — MVVM UI.
+- **`GitKit.Core.Tests`** (xunit) — integration tests against temporary git repos.
+
+Dependency composition happens in `src/GitKit.App/App.xaml.cs::OnStartup` ("poor man's
+DI"): it constructs `ProcessRunner → GitService`, attaches a `GitCommandLogger`, creates a
+`WorkspaceService` and kicks off background cleanup, then builds
+`TortoiseGitLauncher → DialogService → ConflictResolutionCoordinator → MainViewModel` and
+shows `MainWindow`. There is no DI container; add new dependencies by threading them through
+this method.
+
+`WorkspaceService` owns the temp working copies: short-path root `C:\gtk\<n>` (fallback
+`%TEMP%\gtk`), integer-named folders. At startup, `SnapshotExistingFolders()` is called
+**before** any new folder is created, and `CleanupAsync` deletes that snapshot in the
+background — so copies made during the current session are never removed. `GitCommandLogger`
+persists every git command to `%LOCALAPPDATA%\git.kit\logs\git-<timestamp>.log` (separate
+from work folders, so cleanup never touches logs).
+
+### git integration is 100% CLI
+
+There is **no libgit2 / LibGit2Sharp**. All git access flows through
+`IProcessRunner`/`ProcessRunner`, which runs the `git` executable and captures
+stdout/stderr. `GitService` (implements `IGitService`) is the only place that builds git
+command strings; it raises `CommandExecuted` after every invocation so the UI can log
+each command.
+
+Critical detail: `ProcessRunner` forces `LC_ALL=C.UTF-8`, `GIT_TERMINAL_PROMPT=0`, and
+`GIT_EDITOR=true` on the child process. This is load-bearing — `GitService` **parses git's
+English text output** (e.g. detecting empty cherry-picks via "is now empty" / "nothing to
+commit"), and `GIT_EDITOR=true` keeps `cherry-pick --continue` from blocking on an editor.
+Don't remove these or add parsing that depends on localized output.
+
+`GitService` injects the git executable path via its constructor
+(`GitService(IProcessRunner, string gitExecutable = "git")`) — tests can point this
+elsewhere. Structured output is parsed using a `\x1f` (unit separator) field delimiter in
+`for-each-ref` / `log --format` strings. Branch local-vs-remote is decided
+**deterministically** from the full `%(refname)` (`refs/heads/` vs `refs/remotes/`), not by
+guessing from the short name. Commit messages are written to a temp file and passed via
+`git commit -F` to avoid command-line escaping issues.
+
+### Replication flow (the core behavior)
+
+`GitService.ReplicateCommitAsync` orchestrates: (1) verify a clean working tree,
+(2) `PrepareDestinationAsync` checks out the destination branch — creating it if it
+doesn't exist, based on the **name suffix** (ends with `dev` → branch from `develop`,
+otherwise from `master` with fallback to `main`; bases are searched among both local and
+`origin/*` refs), then (3) runs the chosen strategy. Results are modeled as
+`ReplicationResult` with distinct outcomes: **Ok**, **AlreadyApplied** (empty/no-op —
+not an error), **Conflicts**, **Failure**.
+
+When a strategy hits conflicts, `ReplicateCommitAsync` returns `Conflicts` and the UI
+opens the conflict window. `ContinueReplicationAsync` finishes the job: it first checks
+each unmerged file for leftover conflict markers (`<<<<<<<` / `>>>>>>>`) **before**
+staging, because `git add` would erase the unmerged state; then `add -A` and
+`cherry-pick --continue` (or a fresh commit for diff-integration). A resolution identical
+to the destination yields `AlreadyApplied`, not a failure.
+
+### Working always on a temporary copy
+
+The app never mutates the user's original repository. A URL is cloned to a unique temp
+folder; a local path is also cloned to temp, and the copy's `origin` is re-pointed at the
+original's real remote URL so `push` targets the true upstream. This clone/re-point logic
+lives in `MainViewModel` (see `SetRemoteUrlAsync` / `GetRemoteUrlAsync` usage).
+
+### Conflict resolution & TortoiseGit
+
+`ConflictResolutionCoordinator` (App layer) drives conflict UX over
+`ITortoiseGitLauncher`/`TortoiseGitLauncher` (Core). Preferred path is TortoiseGitProc's
+`conflicteditor` command, which extracts index stages itself and **preserves the file's
+original encoding/line endings**. The manual fallback (extracting stages 1/2/3 =
+base/ours/theirs via `IGitService.ExtractConflictStageAsync` and launching
+`TortoiseGitMerge` directly) can alter encoding, so prefer the conflicteditor path.
+TortoiseGit executables are auto-located under Program Files or `PATH`; if not found, the
+user is prompted to pick one at first use. Stage convention throughout: **2 = ours =
+destination, 3 = theirs = origin** of the commit being replicated.
+
+## Testing conventions
+
+Tests are **integration tests**, not mocks: `TestRepository` (`CreateAsync`) spins up a
+real temp git repo (`init -b main`, test user config, `commit.gpgsign false`) and deletes
+it on `Dispose`. `CreateAsync(withSpaceInPath: true)` reproduces real `%TEMP%` paths that
+contain spaces (e.g. `C:\Users\Paulo Rogerio\...`) — quoting bugs in git argument strings
+show up here, so keep coverage for spaced paths when touching command construction.

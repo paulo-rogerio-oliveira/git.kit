@@ -1,0 +1,23 @@
+## .NET / build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+
+## Visual Studio / Rider
+.vs/
+.idea/
+*.suo
+
+## NuGet
+*.nupkg
+packages/
+
+## CD / empacotamento (saídas locais de publish/release)
+publish/
+stage/
+*.zip
+
+## Claude Code (configuração pessoal)
+.claude/settings.local.json

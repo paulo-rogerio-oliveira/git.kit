@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/GitKit.App/GitKit.App.csproj" />
+    <Project Path="src/GitKit.Core/GitKit.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/GitKit.Core.Tests/GitKit.Core.Tests.csproj" />
+  </Folder>
+</Solution>
