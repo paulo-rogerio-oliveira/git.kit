@@ -25,6 +25,15 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Configurar identidade git
+        # Alguns testes clonam repositórios e commitam neles (cherry-pick). Um clone
+        # não herda a config local; sem identidade global o runner falha o commit
+        # ("committer identity unknown"). Espelha uma máquina de desenvolvimento.
+        run: |
+          git config --global user.email "ci@git.kit.local"
+          git config --global user.name "git.kit CI"
+          git config --global commit.gpgsign false
+
       - name: Restore
         run: dotnet restore GitKit.slnx
 
