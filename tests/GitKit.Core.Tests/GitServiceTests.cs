@@ -588,6 +588,52 @@ public sealed class GitServiceTests
     }
 
     [Fact]
+    public async Task Continue_after_conflict_preserves_original_message_and_author()
+    {
+        using var repo = await TestRepository.CreateAsync();
+        await repo.CommitFileAsync("shared.txt", "linha original\n", "base");
+        await repo.GitAsync("branch destino");
+
+        await repo.GitAsync("checkout destino");
+        await repo.CommitFileAsync("shared.txt", "alterado no destino\n", "muda destino");
+
+        await repo.GitAsync("checkout main");
+        await repo.GitAsync("checkout -b origem");
+        // Assunto começando com '#' (número de issue) e autor distinto: o cleanup=strip
+        // do 'cherry-pick --continue' apagaria a linha, deixando só o trailer.
+        var subject = "#1234 corrige bug importante";
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "shared.txt"), "alterado na origem\n");
+        await repo.GitAsync("add shared.txt");
+        var msgFile = Path.Combine(repo.Path, ".git", "MSG_ORIG.txt");
+        await File.WriteAllTextAsync(msgFile, subject + "\n\ncorpo detalhado\n");
+        await repo.RunAsync($"commit --author=\"Autor Original <autor@orig.com>\" -F \"{msgFile}\"");
+        var hash = (await repo.RunAsync("rev-parse HEAD")).StandardOutput.Trim();
+
+        var git = NewService();
+        var commit = new GitCommit(hash, "Autor Original", DateTimeOffset.Now, subject);
+
+        var conflict = await git.ReplicateCommitAsync(repo.Path, commit, "destino", ReplicationMode.CherryPick);
+        Assert.Equal(ReplicationStatus.ConflictsNeedManualResolution, conflict.Status);
+
+        // Usuário resolve o conflito.
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "shared.txt"), "resolvido manualmente\n");
+
+        var result = await git.ContinueReplicationAsync(repo.Path, commit, ReplicationMode.CherryPick);
+        Assert.Equal(ReplicationStatus.Success, result.Status);
+
+        // A mensagem original (com '#') deve ser preservada e o trailer -x referenciado.
+        var subjectAfter = (await repo.RunAsync($"log -1 --format=%s destino")).StandardOutput.Trim();
+        Assert.Equal(subject, subjectAfter);
+        var body = (await repo.RunAsync("log -1 --format=%B destino")).StandardOutput;
+        Assert.Contains("corpo detalhado", body);
+        Assert.Contains($"(cherry picked from commit {hash})", body);
+
+        // A autoria original deve ser mantida.
+        var author = (await repo.RunAsync("log -1 --format=%an destino")).StandardOutput.Trim();
+        Assert.Equal("Autor Original", author);
+    }
+
+    [Fact]
     public async Task Continue_when_resolution_matches_destination_reports_already_applied()
     {
         using var repo = await TestRepository.CreateAsync();

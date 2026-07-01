@@ -356,6 +356,19 @@ public sealed class GitService : IGitService
         }
     }
 
+    /// <summary>
+    /// Reconstrói a mensagem de um cherry-pick concluído manualmente: a mensagem
+    /// original do commit + o mesmo trailer que o <c>git cherry-pick -x</c> adiciona.
+    /// </summary>
+    private async Task<string> BuildCherryPickMessageAsync(string repositoryPath, GitCommit commit, CancellationToken ct)
+    {
+        var raw = await GitAsync($"log -1 --format=%B {commit.Hash}", repositoryPath, ct).ConfigureAwait(false);
+        var original = raw.Success && !string.IsNullOrWhiteSpace(raw.StandardOutput)
+            ? raw.StandardOutput.TrimEnd('\r', '\n')
+            : commit.Subject;
+        return $"{original}\n\n(cherry picked from commit {commit.Hash})";
+    }
+
     private static bool IsEmptyCherryPick(GitCommandResult result)
     {
         var output = result.CombinedOutput;
@@ -482,16 +495,9 @@ public sealed class GitService : IGitService
 
         if (mode == ReplicationMode.CherryPick)
         {
-            var cont = await GitAsync("cherry-pick --continue", repositoryPath, ct).ConfigureAwait(false);
-            if (cont.Success)
-            {
-                return ReplicationResult
-                    .Ok($"Cherry-pick do commit {commit.ShortHash} concluído após a resolução de conflitos.", repositoryPath)
-                    .WithBranch(branch);
-            }
-
-            // Após a resolução o commit pode ter ficado vazio.
-            if (IsEmptyCherryPick(cont))
+            // Se a resolução ficou idêntica ao destino, não há o que commitar.
+            var emptyResolution = (await GitAsync("diff --cached --quiet HEAD", repositoryPath, ct).ConfigureAwait(false)).Success;
+            if (emptyResolution)
             {
                 await GitAsync("cherry-pick --skip", repositoryPath, ct).ConfigureAwait(false);
                 return ReplicationResult
@@ -503,8 +509,19 @@ public sealed class GitService : IGitService
                     .WithBranch(branch);
             }
 
-            return ReplicationResult.Failure(
-                $"Não foi possível concluir o cherry-pick.\n{cont.CombinedOutput}", repositoryPath);
+            // Conclui com 'commit -F' em vez de 'cherry-pick --continue': este último
+            // finaliza a mensagem com cleanup=strip, que REMOVE linhas iniciadas por
+            // '#' (ex.: assuntos com número de issue), deixando só o trailer "(cherry
+            // picked from commit ...)". 'commit -F' usa cleanup=whitespace e preserva
+            // a mensagem; o autor original é mantido a partir de CHERRY_PICK_HEAD.
+            var pickMessage = await BuildCherryPickMessageAsync(repositoryPath, commit, ct).ConfigureAwait(false);
+            var picked = await CommitAsync(repositoryPath, pickMessage, ct).ConfigureAwait(false);
+            return picked.Success
+                ? ReplicationResult
+                    .Ok($"Cherry-pick do commit {commit.ShortHash} concluído após a resolução de conflitos.", repositoryPath)
+                    .WithBranch(branch)
+                : ReplicationResult.Failure(
+                    $"Não foi possível concluir o cherry-pick.\n{picked.CombinedOutput}", repositoryPath);
         }
 
         // Integração de diff: se a resolução não deixou nada estagiado vs HEAD,
