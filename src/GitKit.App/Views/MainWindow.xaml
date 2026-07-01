@@ -42,9 +42,11 @@
                             </Grid.RowDefinitions>
 
                             <Label Grid.Row="0" Grid.Column="0" Content="URL ou caminho" Margin="0,0,12,0" VerticalAlignment="Center" />
-                            <TextBox Grid.Row="0" Grid.Column="1" Margin="0,0,12,0"
-                                     ToolTip="Informe a URL de clone (https/ssh) ou o caminho de um repositório git local"
-                                     Text="{Binding RepositorySource, UpdateSourceTrigger=PropertyChanged}" />
+                            <ComboBox Grid.Row="0" Grid.Column="1" Margin="0,0,12,0"
+                                      IsEditable="True" IsTextSearchEnabled="False" StaysOpenOnEdit="True"
+                                      ItemsSource="{Binding RecentRepositories}"
+                                      ToolTip="Informe a URL de clone (https/ssh) ou o caminho de um repositório git local, ou selecione um já utilizado"
+                                      Text="{Binding RepositorySource, UpdateSourceTrigger=PropertyChanged}" />
                             <Button Grid.Row="0" Grid.Column="2" Content="Iniciar"
                                     Style="{StaticResource PrimaryButton}" Command="{Binding StartCommand}" />
 

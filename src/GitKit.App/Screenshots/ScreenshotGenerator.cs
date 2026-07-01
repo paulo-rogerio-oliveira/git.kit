@@ -46,7 +46,7 @@ public static class ScreenshotGenerator
         var coordinator = new ConflictResolutionCoordinator(git, tortoise, dialogs);
 
         // ---- 1. Tela principal populada ----
-        var main = new MainViewModel(git, coordinator, dialogs, new WorkspaceService(), new FakeRepositoryCache());
+        var main = new MainViewModel(git, coordinator, dialogs, new WorkspaceService(), new FakeRepositoryCache(), new FakeRecentRepositories());
         main.RepositorySource = "git@github.com:exemplo/when.it.git";
         main.StartCommand.Execute(null);
         Pump();
@@ -218,6 +218,18 @@ public static class ScreenshotGenerator
         // Sem cache na captura: o fluxo cai no clone direto (o FakeGitService responde).
         public Task<string?> EnsureCacheAsync(string repositoryUrl, CancellationToken ct = default)
             => Task.FromResult<string?>(null);
+    }
+
+    private sealed class FakeRecentRepositories : IRecentRepositories
+    {
+        public IReadOnlyList<string> GetAll() => new[]
+        {
+            "git@github.com:exemplo/when.it.git",
+            "https://github.com/exemplo/outro-projeto.git",
+            @"C:\projetos\meu-repo-local",
+        };
+
+        public void Add(string source) { }
     }
 
     private sealed class FakeDialogs : IDialogService

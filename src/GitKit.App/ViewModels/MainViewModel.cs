@@ -21,6 +21,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly IDialogService _dialogs;
     private readonly WorkspaceService _workspace;
     private readonly IRepositoryCache _cache;
+    private readonly IRecentRepositories _recent;
     private readonly StringBuilder _log = new();
 
     public MainViewModel(
@@ -28,13 +29,15 @@ public sealed class MainViewModel : ObservableObject
         ConflictResolutionCoordinator coordinator,
         IDialogService dialogs,
         WorkspaceService workspace,
-        IRepositoryCache cache)
+        IRepositoryCache cache,
+        IRecentRepositories recent)
     {
         _git = git;
         _coordinator = coordinator;
         _dialogs = dialogs;
         _workspace = workspace;
         _cache = cache;
+        _recent = recent;
 
         _git.CommandExecuted += OnGitCommandExecuted;
 
@@ -60,12 +63,33 @@ public sealed class MainViewModel : ObservableObject
         ReplicateCommand = new AsyncRelayCommand(ReplicateAsync, CanReplicate);
         PushCommand = new AsyncRelayCommand(PushAsync, () => !IsBusy && IsRepositoryReady && !string.IsNullOrWhiteSpace(PushableBranch));
         ResolveConflictsCommand = new AsyncRelayCommand(ShowConflictsWindowAsync, () => !IsBusy && PendingManualResolution && _pendingCommit is not null);
+
+        // Carrega o histórico e pré-preenche com o último repositório usado.
+        LoadRecentRepositories();
+        if (RecentRepositories.Count > 0)
+            RepositorySource = RecentRepositories[0];
+    }
+
+    private void LoadRecentRepositories()
+    {
+        RecentRepositories.Clear();
+        foreach (var source in _recent.GetAll())
+            RecentRepositories.Add(source);
+    }
+
+    // Registra a origem usada como a mais recente e reflete no combo.
+    private void RegisterRecentRepository(string source)
+    {
+        _recent.Add(source);
+        LoadRecentRepositories();
     }
 
     // ----- Coleções e opções -----
 
     public ObservableCollection<GitBranch> Branches { get; } = new();
     public ObservableCollection<GitCommit> Commits { get; } = new();
+    // Repositórios já utilizados (URLs/caminhos), do mais recente para o mais antigo.
+    public ObservableCollection<string> RecentRepositories { get; } = new();
     public IReadOnlyList<ReplicationModeOption> Modes { get; }
 
     // Views filtradas exibidas na UI. Os branches são filtrados pelo TEXTO DIGITADO
@@ -318,6 +342,7 @@ public sealed class MainViewModel : ObservableObject
             ResetSelections();
             RepositoryPath = target;
             RepositoryUrl = await _git.GetRemoteUrlAsync(target);
+            RegisterRecentRepository(url);
             StatusMessage = cachePath is not null
                 ? $"Repositório pronto (via cache) em {target}."
                 : $"Repositório clonado em {target}.";
@@ -371,6 +396,8 @@ public sealed class MainViewModel : ObservableObject
                 RepositoryUrl = path;
                 StatusMessage = $"Cópia de trabalho criada em {target} — o repositório original não tem remote; o push retornará a {path}.";
             }
+
+            RegisterRecentRepository(path);
 
             // Não faz fetch aqui: isso buscaria do remote real e poderia podar
             // refs locais recém-clonadas do caminho de origem.

@@ -47,11 +47,17 @@ public partial class App : Application
             "git.kit", "cache");
         var repositoryCache = new RepositoryCache(gitService, cacheRoot);
 
+        // Histórico de repositórios já utilizados (para o combo editável do repositório).
+        var recentPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "git.kit", "recent-repositories.json");
+        var recentRepositories = new RecentRepositories(recentPath);
+
         var tortoise = new TortoiseGitLauncher();
         var dialogs = new DialogService();
         var coordinator = new ConflictResolutionCoordinator(gitService, tortoise, dialogs);
 
-        var viewModel = new MainViewModel(gitService, coordinator, dialogs, workspace, repositoryCache);
+        var viewModel = new MainViewModel(gitService, coordinator, dialogs, workspace, repositoryCache, recentRepositories);
 
         var window = new MainWindow { DataContext = viewModel };
         window.Show();

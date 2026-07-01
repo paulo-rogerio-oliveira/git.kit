@@ -7,7 +7,9 @@ conflitos no **TortoiseGit**.
 
 ## Funcionalidades
 
-1. Informar uma **URL** ou um **caminho local** e clicar em **Iniciar**:
+1. Informar uma **URL** ou um **caminho local** e clicar em **Iniciar**. O campo é um
+   **combo editável** que **lista os repositórios já utilizados** e vem **pré-preenchido com
+   o último** (histórico em `%LOCALAPPDATA%\git.kit\recent-repositories.json`):
    - **URL** → o repositório é preparado via **cache local**: na primeira vez cria-se um
      **espelho** (`git clone --mirror`) em `%LOCALAPPDATA%\git.kit\cache`, registrado no
      índice `cache-index.json`; nas próximas vezes o espelho é **atualizado**
