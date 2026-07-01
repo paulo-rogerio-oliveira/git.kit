@@ -93,6 +93,26 @@ dotnet test tests/GitKit.Core.Tests/GitKit.Core.Tests.csproj
 dotnet run --project src/GitKit.App/GitKit.App.csproj
 ```
 
+## Distribuição (CI/CD)
+
+O **CI** (`.github/workflows/ci.yml`) compila e roda os testes em cada push/PR (Windows).
+
+O **CD** (`.github/workflows/release.yml`) dispara em tags `v*` e publica um **executável
+único** self-contained (`git.kit-<versão>-win-x64.exe`, via
+`PublishSingleFile`/`IncludeNativeLibrariesForSelfExtract`) — o usuário final não precisa
+ter o .NET instalado. Junto do executável é distribuído **somente o manual em PDF**
+(`docs/manual-do-usuario.pdf`), anexado ao GitHub Release.
+
+O PDF é a versão impressa de `docs/manual-do-usuario.html` (desenhado para A4). Para
+regenerá-lo após editar o HTML, imprima-o para PDF (ex.: com o Edge headless):
+
+```powershell
+& "$env:ProgramFiles (x86)\Microsoft\Edge\Application\msedge.exe" `
+  --headless=new --disable-gpu --no-pdf-header-footer `
+  --print-to-pdf="docs\manual-do-usuario.pdf" `
+  "file:///$((Resolve-Path docs\manual-do-usuario.html).Path -replace '\\','/')"
+```
+
 ## Fluxo de uso
 
 1. Informe a **URL** (clone numa pasta temporária) **ou um caminho local** de um

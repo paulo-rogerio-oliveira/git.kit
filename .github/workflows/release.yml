@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Versão para o pacote (ex.: v1.0.0). Sem tag, usada apenas no nome do zip.'
+        description: 'Versão para o pacote (ex.: v1.0.0). Sem tag, usada apenas no nome do arquivo.'
         required: false
         default: 'v0.0.0-dev'
 
@@ -26,13 +26,19 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Publish (win-x64, self-contained)
+      - name: Publish (win-x64, executável único, self-contained)
+        # Single-file: um único GitKit.exe, com runtime e libs nativas embutidos
+        # (auto-extraídos em runtime). O usuário final não precisa ter .NET instalado.
         run: >
           dotnet publish src/GitKit.App/GitKit.App.csproj
           -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -p:DebugType=none
           -o publish/app
 
-      - name: Empacotar app + manual do usuário
+      - name: Preparar artefatos (exe único + manual PDF)
         id: pack
         shell: pwsh
         run: |
@@ -41,29 +47,27 @@ jobs:
           $clean = ($tag -replace '^v','')
           if ([string]::IsNullOrWhiteSpace($clean)) { $clean = "dev" }
 
-          $stage = "stage/git.kit-$clean"
-          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          $dist = "dist"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
 
-          # Binários publicados.
-          Copy-Item publish/app/* $stage -Recurse -Force
+          $exe = Join-Path $dist "git.kit-$clean-win-x64.exe"
+          Copy-Item publish/app/GitKit.exe $exe -Force
 
-          # Manual do usuário (HTML + imagens) distribuído junto do artefato.
-          $manual = Join-Path $stage 'manual'
-          New-Item -ItemType Directory -Force -Path $manual | Out-Null
-          Copy-Item docs/manual-do-usuario.html $manual -Force
-          Copy-Item docs/images (Join-Path $manual 'images') -Recurse -Force
+          # Distribui SOMENTE o manual em PDF junto do executável.
+          $pdf = Join-Path $dist "manual-do-usuario.pdf"
+          Copy-Item docs/manual-do-usuario.pdf $pdf -Force
 
-          $zip = "git.kit-$clean-win-x64.zip"
-          Compress-Archive -Path "$stage/*" -DestinationPath $zip -Force
-
-          "zip=$zip" >> $env:GITHUB_OUTPUT
+          "exe=$exe" >> $env:GITHUB_OUTPUT
+          "pdf=$pdf" >> $env:GITHUB_OUTPUT
           "tag=$tag" >> $env:GITHUB_OUTPUT
 
-      - name: Upload do artefato (workflow)
+      - name: Upload dos artefatos (workflow)
         uses: actions/upload-artifact@v4
         with:
           name: git.kit-win-x64
-          path: ${{ steps.pack.outputs.zip }}
+          path: |
+            ${{ steps.pack.outputs.exe }}
+            ${{ steps.pack.outputs.pdf }}
 
       - name: Criar GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -72,6 +76,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >
           gh release create "${{ steps.pack.outputs.tag }}"
-          "${{ steps.pack.outputs.zip }}"
+          "${{ steps.pack.outputs.exe }}"
+          "${{ steps.pack.outputs.pdf }}"
           --title "git.kit ${{ steps.pack.outputs.tag }}"
           --generate-notes

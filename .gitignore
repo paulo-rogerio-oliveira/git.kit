@@ -16,7 +16,7 @@ packages/
 
 ## CD / empacotamento (saídas locais de publish/release)
 publish/
-stage/
+dist/
 *.zip
 
 ## Claude Code (configuração pessoal)
