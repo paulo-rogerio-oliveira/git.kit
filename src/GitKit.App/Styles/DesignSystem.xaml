@@ -83,9 +83,9 @@
     <Style x:Key="PillButtonBase" TargetType="Button">
         <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}" />
         <Setter Property="FontSize" Value="14" />
-        <Setter Property="Height" Value="36" />
+        <Setter Property="Height" Value="32" />
         <Setter Property="MinWidth" Value="88" />
-        <Setter Property="Padding" Value="20,0" />
+        <Setter Property="Padding" Value="18,0" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="HorizontalContentAlignment" Value="Center" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -161,7 +161,7 @@
         <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CaretBrush" Value="{StaticResource InkBrush}" />
-        <Setter Property="Padding" Value="10,7" />
+        <Setter Property="Padding" Value="10,6" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="TextBox">
@@ -263,7 +263,7 @@
         <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
         <Setter Property="Background" Value="{StaticResource CanvasBrush}" />
         <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
-        <Setter Property="Height" Value="36" />
+        <Setter Property="Height" Value="32" />
         <Setter Property="SnapsToDevicePixels" Value="True" />
         <Setter Property="Template">
             <Setter.Value>
@@ -323,9 +323,9 @@
                 <ControlTemplate TargetType="GroupBox">
                     <Border Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
-                            CornerRadius="{StaticResource RadiusLg}" Padding="18">
+                            CornerRadius="{StaticResource RadiusLg}" Padding="14">
                         <DockPanel>
-                            <TextBlock DockPanel.Dock="Top" Margin="0,0,0,12"
+                            <TextBlock DockPanel.Dock="Top" Margin="0,0,0,10"
                                        Style="{StaticResource Typo.Tagline}"
                                        Text="{TemplateBinding Header}" />
                             <ContentPresenter />

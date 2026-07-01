@@ -126,7 +126,8 @@ regenerá-lo após editar o HTML, imprima-o para PDF (ex.: com o Edge headless):
 2. Selecione o **branch de origem** (os commits são carregados automaticamente). No
    **branch de destino**, escolha um existente ou **digite um nome novo** — branches
    inexistentes são criados a partir de develop (sufixo `dev`) ou master.
-3. Escolha a **estratégia** (cherry-pick ou integração de diff).
+3. A replicação usa **cherry-pick** (a escolha de estratégia está temporariamente
+   indisponível na interface).
 4. Selecione o commit na lista e clique em **Replicar commit**.
 5. Se houver conflito, o **formulário de conflitos** abre automaticamente: clique em
    **Resolver** em cada arquivo (abre o TortoiseGitMerge), marque como resolvido, use
