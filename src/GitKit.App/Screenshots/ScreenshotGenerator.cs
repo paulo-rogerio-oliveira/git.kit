@@ -59,7 +59,7 @@ public static class ScreenshotGenerator
         Pump();
 
         var mainWindow = new MainWindow { DataContext = main };
-        Capture(mainWindow, Path.Combine(outputDirectory, "tela-principal.png"), 980, 720);
+        Capture(mainWindow, Path.Combine(outputDirectory, "tela-principal.png"), 1000, 860);
 
         // ---- 2. Formulário de conflitos ----
         var conflicts = new[]
@@ -77,7 +77,7 @@ public static class ScreenshotGenerator
         Pump();
 
         var conflictsWindow = new ConflictsWindow { DataContext = conflictsVm };
-        Capture(conflictsWindow, Path.Combine(outputDirectory, "tela-conflitos.png"), 820, 460);
+        Capture(conflictsWindow, Path.Combine(outputDirectory, "tela-conflitos.png"), 840, 480);
     }
 
     private static void Capture(Window window, string path, int width, int height)

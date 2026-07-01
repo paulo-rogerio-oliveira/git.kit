@@ -12,6 +12,11 @@ integration**. When git cannot merge automatically, the user resolves conflicts 
 The codebase (comments, XML docs, UI strings, user manual) is written in **Portuguese** —
 match that language when editing existing code and user-facing text.
 
+The WPF UI follows an Apple-inspired design system (spec in `design.md`) implemented as a
+merged `ResourceDictionary` at `src/GitKit.App/Styles/DesignSystem.xaml` (color/typography
+tokens, pill buttons, hairline "card" GroupBoxes, templated ComboBox/TextBox/TabItem/DataGrid).
+Style controls by referencing that dictionary's keys — never hard-code hex colors in views.
+
 ## Commands
 
 ```powershell
