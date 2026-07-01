@@ -22,6 +22,19 @@ public interface IGitService
     /// </summary>
     Task<GitCommandResult> CloneAsync(string repositoryUrl, string destinationDirectory, CancellationToken ct = default);
 
+    /// <summary>
+    /// Cria um clone <c>--mirror</c> (bare, com todas as refs) de
+    /// <paramref name="repositoryUrl"/> em <paramref name="cacheDirectory"/>, usado como
+    /// cache local para clones de trabalho rápidos.
+    /// </summary>
+    Task<GitCommandResult> CloneMirrorAsync(string repositoryUrl, string cacheDirectory, CancellationToken ct = default);
+
+    /// <summary>
+    /// Atualiza um cache espelho (<c>remote update --prune</c>), trazendo as refs mais
+    /// recentes do remote de origem.
+    /// </summary>
+    Task<GitCommandResult> UpdateCacheAsync(string cacheDirectory, CancellationToken ct = default);
+
     /// <summary>Atualiza as referências remotas (<c>git fetch --all --prune</c>).</summary>
     Task<GitCommandResult> FetchAsync(string repositoryPath, CancellationToken ct = default);
 

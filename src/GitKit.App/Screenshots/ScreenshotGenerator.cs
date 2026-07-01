@@ -46,7 +46,7 @@ public static class ScreenshotGenerator
         var coordinator = new ConflictResolutionCoordinator(git, tortoise, dialogs);
 
         // ---- 1. Tela principal populada ----
-        var main = new MainViewModel(git, coordinator, dialogs, new WorkspaceService());
+        var main = new MainViewModel(git, coordinator, dialogs, new WorkspaceService(), new FakeRepositoryCache());
         main.RepositorySource = "git@github.com:exemplo/when.it.git";
         main.StartCommand.Execute(null);
         Pump();
@@ -137,6 +137,12 @@ public static class ScreenshotGenerator
             return Task.FromResult(Ok());
         }
 
+        public Task<GitCommandResult> CloneMirrorAsync(string url, string cacheDirectory, CancellationToken ct = default)
+            => Task.FromResult(Ok());
+
+        public Task<GitCommandResult> UpdateCacheAsync(string cacheDirectory, CancellationToken ct = default)
+            => Task.FromResult(Ok());
+
         public Task<GitCommandResult> FetchAsync(string repositoryPath, CancellationToken ct = default) => Task.FromResult(Ok());
 
         public Task<string> GetRemoteUrlAsync(string repositoryPath, CancellationToken ct = default)
@@ -205,6 +211,13 @@ public static class ScreenshotGenerator
         public bool OpenConflictEditor(string repositoryPath, string conflictedFile) => true;
         public bool OpenMerge(string b, string m, string t, string merged, string? bn = null, string? mn = null, string? tn = null, string? mgn = null) => true;
         public bool OpenCommitDialog(string repositoryPath) => true;
+    }
+
+    private sealed class FakeRepositoryCache : IRepositoryCache
+    {
+        // Sem cache na captura: o fluxo cai no clone direto (o FakeGitService responde).
+        public Task<string?> EnsureCacheAsync(string repositoryUrl, CancellationToken ct = default)
+            => Task.FromResult<string?>(null);
     }
 
     private sealed class FakeDialogs : IDialogService

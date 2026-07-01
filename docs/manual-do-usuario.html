@@ -167,8 +167,10 @@ pedirá para você localizar o executável (<code>TortoiseGitProc.exe</code> ou
 <h3><span class="step">1</span> Informar o repositório</h3>
 <p>No campo <b>URL ou caminho</b>, informe uma das opções e clique em <b>Iniciar</b>:</p>
 <ul>
-  <li><b>URL</b> (https/ssh): o repositório é clonado em uma <b>pasta de trabalho</b> de
-      caminho curto (<code>C:\gtk\&lt;n&gt;</code>).</li>
+  <li><b>URL</b> (https/ssh): o repositório é preparado via <b>cache local</b> — um espelho
+      é criado na primeira vez e apenas <b>atualizado</b> nas seguintes; a pasta de trabalho
+      (<code>C:\gtk\&lt;n&gt;</code>) é então clonada do espelho, tornando o início bem mais
+      rápido nas próximas vezes.</li>
   <li><b>Caminho local</b> de um repositório git: ele é validado e <b>clonado para a pasta
       de trabalho</b> — assim o seu repositório original não troca de branch nem é alterado.</li>
 </ul>

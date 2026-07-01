@@ -20,18 +20,21 @@ public sealed class MainViewModel : ObservableObject
     private readonly ConflictResolutionCoordinator _coordinator;
     private readonly IDialogService _dialogs;
     private readonly WorkspaceService _workspace;
+    private readonly IRepositoryCache _cache;
     private readonly StringBuilder _log = new();
 
     public MainViewModel(
         IGitService git,
         ConflictResolutionCoordinator coordinator,
         IDialogService dialogs,
-        WorkspaceService workspace)
+        WorkspaceService workspace,
+        IRepositoryCache cache)
     {
         _git = git;
         _coordinator = coordinator;
         _dialogs = dialogs;
         _workspace = workspace;
+        _cache = cache;
 
         _git.CommandExecuted += OnGitCommandExecuted;
 
@@ -276,12 +279,35 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task CloneAsync(string url)
     {
-        await RunBusyAsync("Clonando repositório...", async () =>
+        await RunBusyAsync("Preparando repositório...", async () =>
         {
-            // Sempre clona numa pasta temporária única, criada no início do processo.
+            // Sempre clona numa pasta de trabalho única.
             var target = _workspace.CreateWorkFolder();
 
-            var result = await _git.CloneAsync(url, target);
+            // Cache: mantém/atualiza um espelho local do remote e clona a cópia de
+            // trabalho a partir dele (bem mais ágil que clonar do remote toda vez).
+            StatusMessage = "Atualizando cache local do repositório...";
+            var cachePath = await _cache.EnsureCacheAsync(url);
+
+            GitCommandResult result;
+            if (cachePath is not null)
+            {
+                StatusMessage = "Clonando a partir do cache local...";
+                result = await _git.CloneAsync(cachePath, target);
+                if (result.Success)
+                {
+                    // O push deve ir para o remote REAL, não para o espelho local:
+                    // reaponta o origin da cópia para a URL informada.
+                    await _git.SetRemoteUrlAsync(target, url);
+                }
+            }
+            else
+            {
+                // Sem cache disponível: clona diretamente do remote.
+                StatusMessage = "Clonando repositório...";
+                result = await _git.CloneAsync(url, target);
+            }
+
             if (!result.Success)
             {
                 _dialogs.ShowError("Falha na clonagem", result.CombinedOutput);
@@ -291,9 +317,10 @@ public sealed class MainViewModel : ObservableObject
 
             ResetSelections();
             RepositoryPath = target;
-            // Clone por URL: o origin da cópia já é o remote real.
             RepositoryUrl = await _git.GetRemoteUrlAsync(target);
-            StatusMessage = $"Repositório clonado em {target}.";
+            StatusMessage = cachePath is not null
+                ? $"Repositório pronto (via cache) em {target}."
+                : $"Repositório clonado em {target}.";
             await LoadBranchesAsync(fetch: false);
         });
     }

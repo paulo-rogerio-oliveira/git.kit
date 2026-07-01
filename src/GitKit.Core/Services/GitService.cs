@@ -55,6 +55,20 @@ public sealed class GitService : IGitService
         return GitAsync(args, null, ct);
     }
 
+    public Task<GitCommandResult> CloneMirrorAsync(string repositoryUrl, string cacheDirectory, CancellationToken ct = default)
+    {
+        // O git cria o diretório de destino; garante apenas o pai.
+        var parent = Path.GetDirectoryName(cacheDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (!string.IsNullOrEmpty(parent))
+            Directory.CreateDirectory(parent);
+
+        var args = $"clone --mirror \"{repositoryUrl}\" \"{cacheDirectory}\"";
+        return GitAsync(args, null, ct);
+    }
+
+    public Task<GitCommandResult> UpdateCacheAsync(string cacheDirectory, CancellationToken ct = default)
+        => GitAsync("remote update --prune", cacheDirectory, ct);
+
     public Task<GitCommandResult> FetchAsync(string repositoryPath, CancellationToken ct = default)
         => GitAsync("fetch --all --prune", repositoryPath, ct);
 

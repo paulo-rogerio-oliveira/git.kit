@@ -8,10 +8,14 @@ conflitos no **TortoiseGit**.
 ## Funcionalidades
 
 1. Informar uma **URL** ou um **caminho local** e clicar em **Iniciar**:
-   - **URL** → o repositório é **clonado numa pasta de trabalho** de caminho curto
-     (`<unidade>\gtk\<n>`, ex.: `C:\gtk\1`; com fallback para `%TEMP%\gtk` se não for
-     possível criar na raiz da unidade). O caminho curto evita estourar o limite de
-     caminho do Windows quando o git cria arquivos profundamente aninhados.
+   - **URL** → o repositório é preparado via **cache local**: na primeira vez cria-se um
+     **espelho** (`git clone --mirror`) em `%LOCALAPPDATA%\git.kit\cache`, registrado no
+     índice `cache-index.json`; nas próximas vezes o espelho é **atualizado**
+     (`git remote update`) em vez de reclonado do zero. A **pasta de trabalho** é então
+     clonada **a partir do espelho local** (bem mais ágil) e o `origin` é reapontado para
+     a URL real (para o push). Se o cache falhar, cai no clone direto do remote. A pasta de
+     trabalho usa caminho curto (`<unidade>\gtk\<n>`, ex.: `C:\gtk\1`; fallback `%TEMP%\gtk`)
+     para evitar estourar o limite de caminho do Windows.
    - **Caminho local** → valida se é um repositório git e o **clona na mesma pasta de
      trabalho**, operando sempre na cópia — assim o projeto original **não troca de
      branch** nem tem a árvore de trabalho alterada. A URL do remote original é exibida.

@@ -59,6 +59,14 @@ background — so copies made during the current session are never removed. `Git
 persists every git command to `%LOCALAPPDATA%\git.kit\logs\git-<timestamp>.log` (separate
 from work folders, so cleanup never touches logs).
 
+`RepositoryCache` (Core, `IRepositoryCache`) speeds up URL clones: it keeps a
+`git clone --mirror` per remote under `%LOCALAPPDATA%\git.kit\cache`, tracked in
+`cache-index.json`. `EnsureCacheAsync(url)` creates the mirror on first use or
+`remote update --prune`s it thereafter, returning the mirror path (or `null` on any
+failure). `MainViewModel.CloneAsync` then clones the working copy **from the mirror** and
+re-points `origin` to the real URL (so push targets the real remote); on `null` it falls
+back to a direct clone. Cache and logs live outside the `C:\gtk` cleanup scope.
+
 ### git integration is 100% CLI
 
 There is **no libgit2 / LibGit2Sharp**. All git access flows through

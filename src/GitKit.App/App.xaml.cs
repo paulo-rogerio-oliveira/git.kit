@@ -1,3 +1,4 @@
+using System.IO;
 using System.Linq;
 using System.Windows;
 using GitKit.App.Screenshots;
@@ -40,11 +41,17 @@ public partial class App : Application
         var toClean = workspace.SnapshotExistingFolders();
         _ = workspace.CleanupAsync(toClean);
 
+        // Cache de repositórios remotos (espelhos locais) para clones de trabalho ágeis.
+        var cacheRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "git.kit", "cache");
+        var repositoryCache = new RepositoryCache(gitService, cacheRoot);
+
         var tortoise = new TortoiseGitLauncher();
         var dialogs = new DialogService();
         var coordinator = new ConflictResolutionCoordinator(gitService, tortoise, dialogs);
 
-        var viewModel = new MainViewModel(gitService, coordinator, dialogs, workspace);
+        var viewModel = new MainViewModel(gitService, coordinator, dialogs, workspace, repositoryCache);
 
         var window = new MainWindow { DataContext = viewModel };
         window.Show();
