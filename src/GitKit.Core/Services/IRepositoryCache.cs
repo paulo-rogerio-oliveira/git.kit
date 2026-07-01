@@ -12,6 +12,7 @@ public interface IRepositoryCache
     /// caminho do espelho (para clonar a cópia de trabalho a partir dele). Retorna
     /// <c>null</c> se não for possível preparar o cache (o chamador deve então clonar
     /// diretamente do remote).
+    /// <paramref name="progress"/> (opcional) recebe as linhas de progresso do git em tempo real.
     /// </summary>
-    Task<string?> EnsureCacheAsync(string repositoryUrl, CancellationToken ct = default);
+    Task<string?> EnsureCacheAsync(string repositoryUrl, IProgress<string>? progress = null, CancellationToken ct = default);
 }

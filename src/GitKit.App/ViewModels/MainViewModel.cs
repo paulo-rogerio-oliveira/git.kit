@@ -16,13 +16,20 @@ namespace GitKit.App.ViewModels;
 /// </summary>
 public sealed class MainViewModel : ObservableObject
 {
+    // Tamanho da página do 'git log' (carga inicial e "Carregar mais").
+    private const int CommitPageSize = 100;
+
     private readonly IGitService _git;
     private readonly ConflictResolutionCoordinator _coordinator;
     private readonly IDialogService _dialogs;
     private readonly WorkspaceService _workspace;
     private readonly IRepositoryCache _cache;
     private readonly IRecentRepositories _recent;
+    private readonly GitCommandLogger? _fileLogger;
     private readonly StringBuilder _log = new();
+
+    // Fonte de cancelamento da operação em andamento (uma por RunBusyAsync).
+    private CancellationTokenSource? _busyCts;
 
     public MainViewModel(
         IGitService git,
@@ -30,7 +37,8 @@ public sealed class MainViewModel : ObservableObject
         IDialogService dialogs,
         WorkspaceService workspace,
         IRepositoryCache cache,
-        IRecentRepositories recent)
+        IRecentRepositories recent,
+        GitCommandLogger? fileLogger = null)
     {
         _git = git;
         _coordinator = coordinator;
@@ -38,6 +46,7 @@ public sealed class MainViewModel : ObservableObject
         _workspace = workspace;
         _cache = cache;
         _recent = recent;
+        _fileLogger = fileLogger;
 
         _git.CommandExecuted += OnGitCommandExecuted;
 
@@ -60,9 +69,14 @@ public sealed class MainViewModel : ObservableObject
         StartCommand = new AsyncRelayCommand(StartAsync, CanStart);
         RefreshBranchesCommand = new AsyncRelayCommand(RefreshBranchesAsync, () => !IsBusy && IsRepositoryReady);
         LoadCommitsCommand = new AsyncRelayCommand(LoadCommitsAsync, () => !IsBusy && SelectedSourceBranch is not null);
+        LoadMoreCommitsCommand = new AsyncRelayCommand(LoadMoreCommitsAsync,
+            () => !IsBusy && IsRepositoryReady && SelectedSourceBranch is not null && !_allCommitsLoaded);
+        SearchCommitsCommand = new AsyncRelayCommand(SearchCommitsAsync,
+            () => !IsBusy && IsRepositoryReady && SelectedSourceBranch is not null && !string.IsNullOrWhiteSpace(CommitFilter));
         ReplicateCommand = new AsyncRelayCommand(ReplicateAsync, CanReplicate);
         PushCommand = new AsyncRelayCommand(PushAsync, () => !IsBusy && IsRepositoryReady && !string.IsNullOrWhiteSpace(PushableBranch));
         ResolveConflictsCommand = new AsyncRelayCommand(ShowConflictsWindowAsync, () => !IsBusy && PendingManualResolution && _pendingCommit is not null);
+        CancelCommand = new RelayCommand(CancelBusyOperation, () => IsBusy && _busyCts is not null);
 
         // Carrega o histórico e pré-preenche com o último repositório usado.
         LoadRecentRepositories();
@@ -141,6 +155,13 @@ public sealed class MainViewModel : ObservableObject
         var term = CommitFilter.Trim();
         if (term.Length == 0)
             return true;
+
+        // Resultados de uma busca no histórico já vêm filtrados pelo git — que
+        // também casa o CORPO da mensagem; o filtro local (hash/autor/assunto)
+        // não deve reescondê-los enquanto o termo for o mesmo da busca.
+        if (term.Equals(_activeSearchTerm, StringComparison.OrdinalIgnoreCase))
+            return true;
+
         return item is GitCommit c
             && (c.ShortHash.Contains(term, StringComparison.OrdinalIgnoreCase)
                 || c.Author.Contains(term, StringComparison.OrdinalIgnoreCase)
@@ -152,9 +173,12 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand StartCommand { get; }
     public AsyncRelayCommand RefreshBranchesCommand { get; }
     public AsyncRelayCommand LoadCommitsCommand { get; }
+    public AsyncRelayCommand LoadMoreCommitsCommand { get; }
+    public AsyncRelayCommand SearchCommitsCommand { get; }
     public AsyncRelayCommand ReplicateCommand { get; }
     public AsyncRelayCommand PushCommand { get; }
     public AsyncRelayCommand ResolveConflictsCommand { get; }
+    public RelayCommand CancelCommand { get; }
 
     // ----- Estado -----
 
@@ -238,6 +262,26 @@ public sealed class MainViewModel : ObservableObject
 
     public bool IsNotBusy => !IsBusy;
 
+    // Paginação: true quando o histórico do branch já foi todo carregado
+    // (ou quando a lista atual é resultado de uma busca no histórico).
+    private bool _allCommitsLoaded;
+
+    // Termo da última busca server-side; vazio quando a lista é o log paginado.
+    private string _activeSearchTerm = string.Empty;
+
+    // Checkbox da aba Log: desmarcado (padrão) = nenhum log é registrado,
+    // nem na UI nem em arquivo.
+    private bool _isLogEnabled;
+    public bool IsLogEnabled
+    {
+        get => _isLogEnabled;
+        set
+        {
+            if (SetProperty(ref _isLogEnabled, value) && _fileLogger is not null)
+                _fileLogger.Enabled = value;
+        }
+    }
+
     private string _statusMessage = "Informe a URL ou o caminho do repositório e clique em Iniciar.";
     public string StatusMessage
     {
@@ -303,33 +347,38 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task CloneAsync(string url)
     {
-        await RunBusyAsync("Preparando repositório...", async () =>
+        await RunBusyAsync("Preparando repositório...", async ct =>
         {
             // Sempre clona numa pasta de trabalho única.
             var target = _workspace.CreateWorkFolder();
 
+            // O git emite as linhas de progresso em tempo real (Receiving objects: N%...);
+            // Progress<T> as devolve no thread da UI para atualizar a barra de status.
+            var cacheProgress = new Progress<string>(line => StatusMessage = $"Cache: {line}");
+            var cloneProgress = new Progress<string>(line => StatusMessage = $"Clone: {line}");
+
             // Cache: mantém/atualiza um espelho local do remote e clona a cópia de
             // trabalho a partir dele (bem mais ágil que clonar do remote toda vez).
             StatusMessage = "Atualizando cache local do repositório...";
-            var cachePath = await _cache.EnsureCacheAsync(url);
+            var cachePath = await _cache.EnsureCacheAsync(url, cacheProgress, ct);
 
             GitCommandResult result;
             if (cachePath is not null)
             {
                 StatusMessage = "Clonando a partir do cache local...";
-                result = await _git.CloneAsync(cachePath, target);
+                result = await _git.CloneAsync(cachePath, target, cloneProgress, ct);
                 if (result.Success)
                 {
                     // O push deve ir para o remote REAL, não para o espelho local:
                     // reaponta o origin da cópia para a URL informada.
-                    await _git.SetRemoteUrlAsync(target, url);
+                    await _git.SetRemoteUrlAsync(target, url, ct);
                 }
             }
             else
             {
                 // Sem cache disponível: clona diretamente do remote.
                 StatusMessage = "Clonando repositório...";
-                result = await _git.CloneAsync(url, target);
+                result = await _git.CloneAsync(url, target, cloneProgress, ct);
             }
 
             if (!result.Success)
@@ -341,20 +390,20 @@ public sealed class MainViewModel : ObservableObject
 
             ResetSelections();
             RepositoryPath = target;
-            RepositoryUrl = await _git.GetRemoteUrlAsync(target);
+            RepositoryUrl = await _git.GetRemoteUrlAsync(target, ct);
             RegisterRecentRepository(url);
             StatusMessage = cachePath is not null
                 ? $"Repositório pronto (via cache) em {target}."
                 : $"Repositório clonado em {target}.";
-            await LoadBranchesAsync(fetch: false);
+            await LoadBranchesCoreAsync(fetch: false, ct);
         });
     }
 
     private async Task OpenLocalAsync(string path)
     {
-        await RunBusyAsync("Validando repositório local...", async () =>
+        await RunBusyAsync("Validando repositório local...", async ct =>
         {
-            if (!await _git.IsRepositoryAsync(path))
+            if (!await _git.IsRepositoryAsync(path, ct))
             {
                 _dialogs.ShowError("Repositório inválido",
                     $"O caminho informado não é a raiz de um repositório git:\n{path}");
@@ -363,13 +412,13 @@ public sealed class MainViewModel : ObservableObject
             }
 
             // URL real do remote do repositório original (apenas para exibição).
-            var originUrl = await _git.GetRemoteUrlAsync(path);
+            var originUrl = await _git.GetRemoteUrlAsync(path, ct);
 
             // Clona o repositório local numa pasta temporária para NÃO forçar
             // troca de branch nem alterar a árvore de trabalho do projeto corrente.
             StatusMessage = "Replicando repositório local em pasta temporária...";
             var target = _workspace.CreateWorkFolder();
-            var result = await _git.CloneAsync(path, target);
+            var result = await _git.CloneAsync(path, target, ct: ct);
             if (!result.Success)
             {
                 _dialogs.ShowError("Falha ao copiar repositório", result.CombinedOutput);
@@ -385,7 +434,7 @@ public sealed class MainViewModel : ObservableObject
             // a URL real do remote (quando o repositório de origem tiver uma).
             if (!string.IsNullOrWhiteSpace(originUrl))
             {
-                await _git.SetRemoteUrlAsync(target, originUrl);
+                await _git.SetRemoteUrlAsync(target, originUrl, ct);
                 RepositoryUrl = originUrl;
                 StatusMessage = $"Cópia de trabalho criada em {target} — push direcionado ao remote {originUrl}.";
             }
@@ -401,7 +450,7 @@ public sealed class MainViewModel : ObservableObject
 
             // Não faz fetch aqui: isso buscaria do remote real e poderia podar
             // refs locais recém-clonadas do caminho de origem.
-            await LoadBranchesAsync(fetch: false);
+            await LoadBranchesCoreAsync(fetch: false, ct);
         });
     }
 
@@ -409,6 +458,8 @@ public sealed class MainViewModel : ObservableObject
     {
         Branches.Clear();
         Commits.Clear();
+        _allCommitsLoaded = false;
+        _activeSearchTerm = string.Empty;
         SelectedSourceBranch = null;
         DestinationBranch = string.Empty;
         SelectedCommit = null;
@@ -419,26 +470,25 @@ public sealed class MainViewModel : ObservableObject
     }
 
     // Comando "Atualizar": busca do remote (fetch + prune) e recarrega.
-    private Task RefreshBranchesAsync() => LoadBranchesAsync(fetch: true);
-
-    private async Task LoadBranchesAsync(bool fetch)
+    private async Task RefreshBranchesAsync()
     {
         if (!IsRepositoryReady)
             return;
+        await RunBusyAsync("Atualizando branches...", ct => LoadBranchesCoreAsync(fetch: true, ct));
+    }
 
-        await RunBusyAsync(fetch ? "Atualizando branches..." : "Carregando branches...", async () =>
-        {
-            if (fetch)
-                await _git.FetchAsync(RepositoryPath);
+    private async Task LoadBranchesCoreAsync(bool fetch, CancellationToken ct)
+    {
+        if (fetch)
+            await _git.FetchAsync(RepositoryPath, ct);
 
-            var branches = await _git.GetBranchesAsync(RepositoryPath);
+        var branches = await _git.GetBranchesAsync(RepositoryPath, ct);
 
-            Branches.Clear();
-            foreach (var branch in branches.OrderBy(b => b.IsRemote).ThenBy(b => b.Name))
-                Branches.Add(branch);
+        Branches.Clear();
+        foreach (var branch in branches.OrderBy(b => b.IsRemote).ThenBy(b => b.Name))
+            Branches.Add(branch);
 
-            StatusMessage = $"{Branches.Count} branch(es) carregado(s).";
-        });
+        StatusMessage = $"{Branches.Count} branch(es) carregado(s).";
     }
 
     private async Task LoadCommitsAsync()
@@ -446,14 +496,73 @@ public sealed class MainViewModel : ObservableObject
         if (SelectedSourceBranch is null || !IsRepositoryReady)
             return;
 
-        await RunBusyAsync("Carregando commits...", async () =>
+        await RunBusyAsync("Carregando commits...", async ct =>
         {
-            var commits = await _git.GetCommitsAsync(RepositoryPath, SelectedSourceBranch.Name);
+            var branch = SelectedSourceBranch.Name;
+            var commits = await _git.GetCommitsAsync(RepositoryPath, branch, CommitPageSize, 0, ct);
+
+            Commits.Clear();
+            _activeSearchTerm = string.Empty;
+            foreach (var commit in commits)
+                Commits.Add(commit);
+            _allCommitsLoaded = commits.Count < CommitPageSize;
+
+            StatusMessage = _allCommitsLoaded
+                ? $"{Commits.Count} commit(s) do branch '{branch}' (histórico completo)."
+                : $"{Commits.Count} commit(s) mais recentes do branch '{branch}'.";
+        });
+    }
+
+    // "Carregar mais": anexa a próxima página do histórico do branch.
+    private async Task LoadMoreCommitsAsync()
+    {
+        if (SelectedSourceBranch is null || !IsRepositoryReady || _allCommitsLoaded)
+            return;
+
+        await RunBusyAsync("Carregando mais commits...", async ct =>
+        {
+            var branch = SelectedSourceBranch.Name;
+            var commits = await _git.GetCommitsAsync(RepositoryPath, branch, CommitPageSize, Commits.Count, ct);
+
+            foreach (var commit in commits)
+                Commits.Add(commit);
+            _allCommitsLoaded = commits.Count < CommitPageSize;
+
+            StatusMessage = _allCommitsLoaded
+                ? $"{Commits.Count} commit(s) do branch '{branch}' (histórico completo)."
+                : $"{Commits.Count} commit(s) carregados do branch '{branch}'.";
+        });
+    }
+
+    // "Buscar no histórico": procura o termo do filtro em TODO o histórico do
+    // branch (mensagem e autor, via git log), não só nos commits já carregados.
+    private async Task SearchCommitsAsync()
+    {
+        if (SelectedSourceBranch is null || !IsRepositoryReady)
+            return;
+
+        var term = CommitFilter.Trim();
+        if (term.Length == 0)
+            return;
+
+        await RunBusyAsync($"Buscando '{term}' no histórico...", async ct =>
+        {
+            var branch = SelectedSourceBranch.Name;
+            var commits = await _git.SearchCommitsAsync(RepositoryPath, branch, term, CommitPageSize, ct);
+
             Commits.Clear();
             foreach (var commit in commits)
                 Commits.Add(commit);
 
-            StatusMessage = $"{Commits.Count} commit(s) do branch '{SelectedSourceBranch.Name}'.";
+            // A lista passa a ser o resultado da busca: sem "carregar mais" até
+            // recarregar o log, e o filtro local não deve reescondê-la.
+            _activeSearchTerm = term;
+            _allCommitsLoaded = true;
+            CommitsView.Refresh();
+
+            StatusMessage = commits.Count == 0
+                ? $"Nenhum commit com '{term}' no histórico de '{branch}'. Recarregue selecionando o branch novamente."
+                : $"{commits.Count} commit(s) com '{term}' no histórico de '{branch}'.";
         });
     }
 
@@ -472,14 +581,14 @@ public sealed class MainViewModel : ObservableObject
 
         var mode = SelectedMode.Mode;
 
-        await RunBusyAsync($"Replicando {commit.ShortHash}...", async () =>
+        await RunBusyAsync($"Replicando {commit.ShortHash}...", async ct =>
         {
             PendingManualResolution = false;
             PushableBranch = string.Empty;
             ClearPending();
 
             var result = await _git.ReplicateCommitAsync(
-                RepositoryPath, commit, destination, mode);
+                RepositoryPath, commit, destination, mode, ct);
 
             // Usa o nome do branch LOCAL realmente preparado (sem 'origin/'),
             // que é o ref correto para o push.
@@ -533,9 +642,9 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        await RunBusyAsync($"Enviando '{branch}'...", async () =>
+        await RunBusyAsync($"Enviando '{branch}'...", async ct =>
         {
-            var result = await _git.PushAsync(RepositoryPath, branch);
+            var result = await _git.PushAsync(RepositoryPath, branch, ct: ct);
             if (result.Success)
             {
                 StatusMessage = $"Branch '{branch}' enviado para o remote com sucesso.";
@@ -590,13 +699,19 @@ public sealed class MainViewModel : ObservableObject
 
     // ----- Infra -----
 
-    private async Task RunBusyAsync(string status, Func<Task> action)
+    private async Task RunBusyAsync(string status, Func<CancellationToken, Task> action)
     {
+        using var cts = new CancellationTokenSource();
+        _busyCts = cts;
         try
         {
             IsBusy = true;
             StatusMessage = status;
-            await action();
+            await action(cts.Token);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            StatusMessage = "Operação cancelada.";
         }
         catch (Exception ex)
         {
@@ -605,12 +720,28 @@ public sealed class MainViewModel : ObservableObject
         }
         finally
         {
+            // Só limpa se o CTS ainda for o desta operação (proteção contra
+            // operações sobrepostas disparadas por setters de binding).
+            if (ReferenceEquals(_busyCts, cts))
+                _busyCts = null;
             IsBusy = false;
         }
     }
 
+    // Botão "Cancelar" da barra de status: interrompe a operação em andamento
+    // (o processo git é finalizado, sem ficar órfão em background).
+    private void CancelBusyOperation()
+    {
+        _busyCts?.Cancel();
+        StatusMessage = "Cancelando...";
+    }
+
     private void OnGitCommandExecuted(GitCommandResult result)
     {
+        // Log desabilitado (padrão): não acumula nada na UI.
+        if (!IsLogEnabled)
+            return;
+
         void Append()
         {
             _log.AppendLine($"$ {result.Command}");

@@ -104,9 +104,23 @@
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
 
-                            <TextBox Grid.Row="0" Margin="0,0,0,10"
-                                     ToolTip="Filtrar commits por hash, autor ou mensagem"
-                                     Text="{Binding CommitFilter, UpdateSourceTrigger=PropertyChanged}" />
+                            <Grid Grid.Row="0" Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <TextBox Grid.Column="0"
+                                         ToolTip="Filtrar os commits carregados por hash, autor ou mensagem"
+                                         Text="{Binding CommitFilter, UpdateSourceTrigger=PropertyChanged}" />
+                                <Button Grid.Column="1" Content="Buscar no histórico" Margin="10,0,0,0"
+                                        Command="{Binding SearchCommitsCommand}"
+                                        ToolTip="Procura o termo em TODO o histórico do branch (mensagem e autor), não só nos commits já carregados" />
+                                <Button Grid.Column="2" Content="Carregar mais" Margin="10,0,0,0"
+                                        Command="{Binding LoadMoreCommitsCommand}"
+                                        ToolTip="Carrega os próximos commits do histórico do branch" />
+                            </Grid>
 
                             <DataGrid Grid.Row="1" ItemsSource="{Binding CommitsView}" SelectedItem="{Binding SelectedCommit}">
                                 <DataGrid.Columns>
@@ -134,8 +148,19 @@
 
             <!-- ===================== Aba: Log ===================== -->
             <TabItem Header="Log">
-                <TextBox Margin="0,10,0,0" Style="{StaticResource CodeTextBox}"
-                         Text="{Binding Log, Mode=OneWay}" TextWrapping="NoWrap" />
+                <Grid Margin="0,10,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <CheckBox Grid.Row="0" Margin="0,0,0,8"
+                              Content="Registrar log dos comandos git (nesta aba e em arquivo)"
+                              ToolTip="Desmarcado (padrão), nenhum log é registrado"
+                              IsChecked="{Binding IsLogEnabled}" />
+                    <TextBox Grid.Row="1" Style="{StaticResource CodeTextBox}"
+                             Text="{Binding Log, Mode=OneWay}" TextWrapping="NoWrap" />
+                </Grid>
             </TabItem>
 
         </TabControl>
@@ -145,6 +170,12 @@
             <StatusBarItem>
                 <ProgressBar Width="120" Height="4" IsIndeterminate="True"
                              Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}" />
+            </StatusBarItem>
+            <StatusBarItem>
+                <Button Content="Cancelar" Padding="10,2"
+                        Command="{Binding CancelCommand}"
+                        ToolTip="Interrompe a operação git em andamento"
+                        Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}" />
             </StatusBarItem>
             <StatusBarItem>
                 <TextBlock Style="{StaticResource Typo.Caption}" Text="{Binding StatusMessage}" />

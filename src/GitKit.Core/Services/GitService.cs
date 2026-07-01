@@ -25,12 +25,16 @@ public sealed class GitService : IGitService
 
     public event Action<GitCommandResult>? CommandExecuted;
 
-    private async Task<GitCommandResult> GitAsync(string arguments, string? workingDirectory, CancellationToken ct)
+    private async Task<GitCommandResult> GitAsync(string arguments, string? workingDirectory, CancellationToken ct, Action<string>? onOutputLine = null)
     {
-        var result = await _runner.RunAsync(_gitExecutable, arguments, workingDirectory, ct).ConfigureAwait(false);
+        var result = await _runner.RunAsync(_gitExecutable, arguments, workingDirectory, onOutputLine, ct).ConfigureAwait(false);
         CommandExecuted?.Invoke(result);
         return result;
     }
+
+    // Converte um IProgress opcional no callback de linha do runner.
+    private static Action<string>? AsLineCallback(IProgress<string>? progress)
+        => progress is null ? null : progress.Report;
 
     public async Task<bool> IsGitAvailableAsync(CancellationToken ct = default)
     {
@@ -47,27 +51,29 @@ public sealed class GitService : IGitService
         return result.Success && result.StandardOutput.Trim().Equals("true", StringComparison.OrdinalIgnoreCase);
     }
 
-    public Task<GitCommandResult> CloneAsync(string repositoryUrl, string destinationDirectory, CancellationToken ct = default)
+    public Task<GitCommandResult> CloneAsync(string repositoryUrl, string destinationDirectory, IProgress<string>? progress = null, CancellationToken ct = default)
     {
         Directory.CreateDirectory(destinationDirectory);
         // Clona o conteúdo do repositório dentro do diretório selecionado.
         var args = $"clone --progress \"{repositoryUrl}\" \"{destinationDirectory}\"";
-        return GitAsync(args, null, ct);
+        return GitAsync(args, null, ct, AsLineCallback(progress));
     }
 
-    public Task<GitCommandResult> CloneMirrorAsync(string repositoryUrl, string cacheDirectory, CancellationToken ct = default)
+    public Task<GitCommandResult> CloneMirrorAsync(string repositoryUrl, string cacheDirectory, IProgress<string>? progress = null, CancellationToken ct = default)
     {
         // O git cria o diretório de destino; garante apenas o pai.
         var parent = Path.GetDirectoryName(cacheDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         if (!string.IsNullOrEmpty(parent))
             Directory.CreateDirectory(parent);
 
-        var args = $"clone --mirror \"{repositoryUrl}\" \"{cacheDirectory}\"";
-        return GitAsync(args, null, ct);
+        var args = $"clone --mirror --progress \"{repositoryUrl}\" \"{cacheDirectory}\"";
+        return GitAsync(args, null, ct, AsLineCallback(progress));
     }
 
-    public Task<GitCommandResult> UpdateCacheAsync(string cacheDirectory, CancellationToken ct = default)
-        => GitAsync("remote update --prune", cacheDirectory, ct);
+    public Task<GitCommandResult> UpdateCacheAsync(string cacheDirectory, IProgress<string>? progress = null, CancellationToken ct = default)
+        // fetch --all --prune equivale ao 'remote update --prune' num espelho,
+        // mas aceita --progress (o 'remote update' não repassa a flag).
+        => GitAsync("fetch --all --prune --progress", cacheDirectory, ct, AsLineCallback(progress));
 
     public Task<GitCommandResult> FetchAsync(string repositoryPath, CancellationToken ct = default)
         => GitAsync("fetch --all --prune", repositoryPath, ct);
@@ -124,18 +130,53 @@ public sealed class GitService : IGitService
         return branches;
     }
 
-    public async Task<IReadOnlyList<GitCommit>> GetCommitsAsync(string repositoryPath, string branch, int max = 100, CancellationToken ct = default)
+    // Formato de uma linha por commit para 'git log', delimitado por \x1f.
+    private static readonly string LogFormat = $"%H{FieldSep}%an{FieldSep}%aI{FieldSep}%s";
+
+    public async Task<IReadOnlyList<GitCommit>> GetCommitsAsync(string repositoryPath, string branch, int max = 100, int skip = 0, CancellationToken ct = default)
     {
-        var format = $"%H{FieldSep}%an{FieldSep}%aI{FieldSep}%s";
+        var skipArg = skip > 0 ? $" --skip {skip}" : string.Empty;
         var result = await GitAsync(
-            $"log \"{branch}\" -n {max} --format=\"{format}\"",
+            $"log \"{branch}\" -n {max}{skipArg} --format=\"{LogFormat}\"",
             repositoryPath, ct).ConfigureAwait(false);
 
-        if (!result.Success)
-            return Array.Empty<GitCommit>();
+        return result.Success ? ParseCommits(result.StandardOutput) : Array.Empty<GitCommit>();
+    }
 
+    public async Task<IReadOnlyList<GitCommit>> SearchCommitsAsync(string repositoryPath, string branch, string term, int max = 100, CancellationToken ct = default)
+    {
+        var text = term.Trim();
+        if (text.Length == 0)
+            return await GetCommitsAsync(repositoryPath, branch, max, 0, ct).ConfigureAwait(false);
+
+        // --fixed-strings: o termo é literal (não regex); -i via --regexp-ignore-case.
+        // --grep e --author combinados no MESMO comando exigem ambos; roda em
+        // separado e mescla para obter a semântica OU (mensagem OU autor).
+        var escaped = text.Replace("\"", "\\\"");
+        var common = $"log \"{branch}\" -n {max} --fixed-strings --regexp-ignore-case --format=\"{LogFormat}\"";
+
+        var byMessage = await GitAsync($"{common} --grep=\"{escaped}\"", repositoryPath, ct).ConfigureAwait(false);
+        var byAuthor = await GitAsync($"{common} --author=\"{escaped}\"", repositoryPath, ct).ConfigureAwait(false);
+
+        var merged = new Dictionary<string, GitCommit>(StringComparer.Ordinal);
+        foreach (var result in new[] { byMessage, byAuthor })
+        {
+            if (!result.Success)
+                continue;
+            foreach (var commit in ParseCommits(result.StandardOutput))
+                merged.TryAdd(commit.Hash, commit);
+        }
+
+        return merged.Values
+            .OrderByDescending(c => c.Date)
+            .Take(max)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<GitCommit> ParseCommits(string output)
+    {
         var commits = new List<GitCommit>();
-        foreach (var line in result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
             var parts = line.TrimEnd('\r').Split(FieldSep);
             if (parts.Length < 4)
@@ -456,13 +497,28 @@ public sealed class GitService : IGitService
     public async Task<string?> ExtractConflictStageAsync(
         string repositoryPath, string file, int stage, string destinationPath, CancellationToken ct = default)
     {
-        // git show :<stage>:<file> imprime o blob daquele estágio do índice.
-        var result = await GitAsync($"show \":{stage}:{file}\"", repositoryPath, ct).ConfigureAwait(false);
+        // checkout-index --temp grava o blob do estágio direto em um arquivo
+        // temporário (bytes intactos — capturar via stdout corromperia binários
+        // e alteraria codificação/quebras de linha) e imprime "<temp>\t<caminho>".
+        var result = await GitAsync(
+            $"checkout-index --stage={stage} --temp -- \"{file}\"",
+            repositoryPath, ct).ConfigureAwait(false);
         if (!result.Success)
             return null;
 
+        var line = result.StandardOutput
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.TrimEnd('\r'))
+            .FirstOrDefault(l => l.Contains('\t'));
+        if (line is null)
+            return null;
+
+        var tempPath = Path.Combine(repositoryPath, line[..line.IndexOf('\t')]);
+        if (!File.Exists(tempPath))
+            return null;
+
         Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
-        await File.WriteAllTextAsync(destinationPath, result.StandardOutput, ct).ConfigureAwait(false);
+        File.Move(tempPath, destinationPath, overwrite: true);
         return destinationPath;
     }
 

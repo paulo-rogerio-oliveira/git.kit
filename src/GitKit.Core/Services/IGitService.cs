@@ -18,22 +18,24 @@ public interface IGitService
 
     /// <summary>
     /// Clona <paramref name="repositoryUrl"/> dentro de <paramref name="destinationDirectory"/>.
-    /// Retorna o caminho do repositório clonado.
+    /// <paramref name="progress"/> (opcional) recebe as linhas de progresso do git em tempo real.
     /// </summary>
-    Task<GitCommandResult> CloneAsync(string repositoryUrl, string destinationDirectory, CancellationToken ct = default);
+    Task<GitCommandResult> CloneAsync(string repositoryUrl, string destinationDirectory, IProgress<string>? progress = null, CancellationToken ct = default);
 
     /// <summary>
     /// Cria um clone <c>--mirror</c> (bare, com todas as refs) de
     /// <paramref name="repositoryUrl"/> em <paramref name="cacheDirectory"/>, usado como
     /// cache local para clones de trabalho rápidos.
+    /// <paramref name="progress"/> (opcional) recebe as linhas de progresso do git em tempo real.
     /// </summary>
-    Task<GitCommandResult> CloneMirrorAsync(string repositoryUrl, string cacheDirectory, CancellationToken ct = default);
+    Task<GitCommandResult> CloneMirrorAsync(string repositoryUrl, string cacheDirectory, IProgress<string>? progress = null, CancellationToken ct = default);
 
     /// <summary>
-    /// Atualiza um cache espelho (<c>remote update --prune</c>), trazendo as refs mais
+    /// Atualiza um cache espelho (<c>fetch --all --prune</c>), trazendo as refs mais
     /// recentes do remote de origem.
+    /// <paramref name="progress"/> (opcional) recebe as linhas de progresso do git em tempo real.
     /// </summary>
-    Task<GitCommandResult> UpdateCacheAsync(string cacheDirectory, CancellationToken ct = default);
+    Task<GitCommandResult> UpdateCacheAsync(string cacheDirectory, IProgress<string>? progress = null, CancellationToken ct = default);
 
     /// <summary>Atualiza as referências remotas (<c>git fetch --all --prune</c>).</summary>
     Task<GitCommandResult> FetchAsync(string repositoryPath, CancellationToken ct = default);
@@ -52,8 +54,18 @@ public interface IGitService
     /// <summary>Lista branches locais e remotos.</summary>
     Task<IReadOnlyList<GitBranch>> GetBranchesAsync(string repositoryPath, CancellationToken ct = default);
 
-    /// <summary>Lista os commits mais recentes do branch informado.</summary>
-    Task<IReadOnlyList<GitCommit>> GetCommitsAsync(string repositoryPath, string branch, int max = 100, CancellationToken ct = default);
+    /// <summary>
+    /// Lista os commits mais recentes do branch informado. <paramref name="skip"/>
+    /// pula os N primeiros (paginação: "carregar mais").
+    /// </summary>
+    Task<IReadOnlyList<GitCommit>> GetCommitsAsync(string repositoryPath, string branch, int max = 100, int skip = 0, CancellationToken ct = default);
+
+    /// <summary>
+    /// Busca commits em TODO o histórico do branch cuja mensagem (assunto/corpo)
+    /// ou autor contenham <paramref name="term"/> (texto literal, sem distinção de
+    /// maiúsculas), do mais recente para o mais antigo.
+    /// </summary>
+    Task<IReadOnlyList<GitCommit>> SearchCommitsAsync(string repositoryPath, string branch, string term, int max = 100, CancellationToken ct = default);
 
     /// <summary>
     /// Replica <paramref name="commit"/> do branch de origem no branch de destino,
@@ -87,8 +99,9 @@ public interface IGitService
     /// <summary>
     /// Extrai o conteúdo de um estágio do índice de um arquivo em conflito
     /// (1 = ancestral comum/base, 2 = nosso/destino, 3 = deles/origem) para
-    /// <paramref name="destinationPath"/>. Retorna o caminho gravado, ou null
-    /// se o estágio não existir (ex.: conflito de adição sem ancestral).
+    /// <paramref name="destinationPath"/>, preservando os bytes do blob
+    /// (codificação e arquivos binários intactos). Retorna o caminho gravado,
+    /// ou null se o estágio não existir (ex.: conflito de adição sem ancestral).
     /// </summary>
     Task<string?> ExtractConflictStageAsync(
         string repositoryPath, string file, int stage, string destinationPath, CancellationToken ct = default);

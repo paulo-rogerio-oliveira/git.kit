@@ -31,6 +31,8 @@ public partial class App : Application
         var gitService = new GitService(processRunner);
 
         // Registra os comandos git em uma pasta de logs separada (uma por sessão).
+        // Nasce DESABILITADO: só grava quando o usuário marca o checkbox de log
+        // na UI (o MainViewModel liga/desliga via IsLogEnabled).
         var gitLogger = new GitCommandLogger();
         gitLogger.Attach(gitService);
 
@@ -57,7 +59,7 @@ public partial class App : Application
         var dialogs = new DialogService();
         var coordinator = new ConflictResolutionCoordinator(gitService, tortoise, dialogs);
 
-        var viewModel = new MainViewModel(gitService, coordinator, dialogs, workspace, repositoryCache, recentRepositories);
+        var viewModel = new MainViewModel(gitService, coordinator, dialogs, workspace, repositoryCache, recentRepositories, gitLogger);
 
         var window = new MainWindow { DataContext = viewModel };
         window.Show();

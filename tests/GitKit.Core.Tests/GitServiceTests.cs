@@ -1,3 +1,4 @@
+using System.Text;
 using GitKit.Core.Models;
 using GitKit.Core.Services;
 using Xunit;
@@ -687,6 +688,119 @@ public sealed class GitServiceTests
         // Sem resolver (arquivo ainda com marcadores de conflito), tentar concluir falha.
         var concluded = await git.ContinueReplicationAsync(repo.Path, commit, ReplicationMode.CherryPick);
         Assert.Equal(ReplicationStatus.ConflictsNeedManualResolution, concluded.Status);
+    }
+
+    [Fact]
+    public async Task GetCommits_skip_paginates_history()
+    {
+        using var repo = await TestRepository.CreateAsync();
+        for (var i = 1; i <= 5; i++)
+            await repo.CommitFileAsync("a.txt", $"v{i}", $"commit {i}");
+
+        var git = NewService();
+        var page1 = await git.GetCommitsAsync(repo.Path, "main", max: 2);
+        var page2 = await git.GetCommitsAsync(repo.Path, "main", max: 2, skip: 2);
+        var page3 = await git.GetCommitsAsync(repo.Path, "main", max: 2, skip: 4);
+
+        Assert.Equal(new[] { "commit 5", "commit 4" }, page1.Select(c => c.Subject));
+        Assert.Equal(new[] { "commit 3", "commit 2" }, page2.Select(c => c.Subject));
+        Assert.Equal(new[] { "commit 1" }, page3.Select(c => c.Subject));
+    }
+
+    [Fact]
+    public async Task SearchCommits_matches_message_body_and_author_case_insensitively()
+    {
+        using var repo = await TestRepository.CreateAsync();
+        // Termo apenas no CORPO da mensagem (o filtro local da UI só vê o assunto).
+        await repo.CommitFileAsync("a.txt", "v1", "primeiro commit\n\ncorpo com TICKET-123 referenciado");
+        await repo.CommitFileAsync("a.txt", "v2", "segundo commit");
+        // Commit com autor distinto.
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "a.txt"), "v3");
+        await repo.GitAsync("add a.txt");
+        await repo.GitAsync("commit --author=\"Maria Souza <maria@exemplo.com>\" -m \"terceiro commit\"");
+
+        var git = NewService();
+
+        var byBody = await git.SearchCommitsAsync(repo.Path, "main", "ticket-123");
+        var found = Assert.Single(byBody);
+        Assert.Equal("primeiro commit", found.Subject);
+
+        var byAuthor = await git.SearchCommitsAsync(repo.Path, "main", "maria");
+        var author = Assert.Single(byAuthor);
+        Assert.Equal("terceiro commit", author.Subject);
+
+        Assert.Empty(await git.SearchCommitsAsync(repo.Path, "main", "termo-inexistente-xyz"));
+    }
+
+    [Fact]
+    public async Task ExtractConflictStage_preserves_exact_bytes_of_non_utf8_content()
+    {
+        using var repo = await TestRepository.CreateAsync();
+        await repo.GitAsync("config core.autocrlf false");
+
+        // Conteúdo UTF-16 LE com BOM: capturar via stdout (implementação antiga)
+        // corromperia os bytes; a extração deve devolver o blob intacto.
+        static byte[] Utf16(string text)
+            => new byte[] { 0xFF, 0xFE }.Concat(Encoding.Unicode.GetBytes(text)).ToArray();
+
+        var file = Path.Combine(repo.Path, "dados.txt");
+        var mineBytes = Utf16("conteúdo do DESTINO\r\n");
+        var theirsBytes = Utf16("conteúdo da ORIGEM\r\n");
+
+        await File.WriteAllBytesAsync(file, Utf16("linha original\r\n"));
+        await repo.GitAsync("add dados.txt");
+        await repo.GitAsync("commit -m base");
+        await repo.GitAsync("branch destino");
+
+        await repo.GitAsync("checkout destino");
+        await File.WriteAllBytesAsync(file, mineBytes);
+        await repo.GitAsync("add dados.txt");
+        await repo.GitAsync("commit -m \"muda destino\"");
+
+        await repo.GitAsync("checkout main");
+        await repo.GitAsync("checkout -b origem");
+        await File.WriteAllBytesAsync(file, theirsBytes);
+        await repo.GitAsync("add dados.txt");
+        await repo.GitAsync("commit -m \"muda origem\"");
+        var hash = (await repo.RunAsync("rev-parse HEAD")).StandardOutput.Trim();
+
+        var git = NewService();
+        var commit = new GitCommit(hash, "autor", DateTimeOffset.Now, "muda origem");
+        var result = await git.ReplicateCommitAsync(repo.Path, commit, "destino", ReplicationMode.CherryPick);
+        Assert.Equal(ReplicationStatus.ConflictsNeedManualResolution, result.Status);
+
+        var dir = Path.Combine(Path.GetTempPath(), "git.kit-bytes-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var minePath = await git.ExtractConflictStageAsync(repo.Path, "dados.txt", 2, Path.Combine(dir, "mine.txt"));
+            var theirsPath = await git.ExtractConflictStageAsync(repo.Path, "dados.txt", 3, Path.Combine(dir, "theirs.txt"));
+
+            Assert.NotNull(minePath);
+            Assert.NotNull(theirsPath);
+            Assert.Equal(mineBytes, await File.ReadAllBytesAsync(minePath!));
+            Assert.Equal(theirsBytes, await File.ReadAllBytesAsync(theirsPath!));
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task ProcessRunner_cancellation_kills_git_process()
+    {
+        using var repo = await TestRepository.CreateAsync();
+        await repo.CommitFileAsync("a.txt", "x", "base");
+
+        // Contrato de cancelamento: o token cancelado gera OperationCanceledException
+        // (o processo é morto, sem resultado parcial). Token já cancelado é a forma
+        // determinística de exercitar esse caminho.
+        var runner = new ProcessRunner();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => runner.RunAsync("git", "log", repo.Path, null, cts.Token));
     }
 
     [Fact]

@@ -131,16 +131,16 @@ public static class ScreenshotGenerator
         public Task<bool> IsGitAvailableAsync(CancellationToken ct = default) => Task.FromResult(true);
         public Task<bool> IsRepositoryAsync(string path, CancellationToken ct = default) => Task.FromResult(true);
 
-        public Task<GitCommandResult> CloneAsync(string url, string dest, CancellationToken ct = default)
+        public Task<GitCommandResult> CloneAsync(string url, string dest, IProgress<string>? progress = null, CancellationToken ct = default)
         {
             CommandExecuted?.Invoke(new GitCommandResult($"clone {url} {dest}", 0, "Cloning into ...\ndone.", string.Empty));
             return Task.FromResult(Ok());
         }
 
-        public Task<GitCommandResult> CloneMirrorAsync(string url, string cacheDirectory, CancellationToken ct = default)
+        public Task<GitCommandResult> CloneMirrorAsync(string url, string cacheDirectory, IProgress<string>? progress = null, CancellationToken ct = default)
             => Task.FromResult(Ok());
 
-        public Task<GitCommandResult> UpdateCacheAsync(string cacheDirectory, CancellationToken ct = default)
+        public Task<GitCommandResult> UpdateCacheAsync(string cacheDirectory, IProgress<string>? progress = null, CancellationToken ct = default)
             => Task.FromResult(Ok());
 
         public Task<GitCommandResult> FetchAsync(string repositoryPath, CancellationToken ct = default) => Task.FromResult(Ok());
@@ -165,7 +165,10 @@ public static class ScreenshotGenerator
             return Task.FromResult(list);
         }
 
-        public Task<IReadOnlyList<GitCommit>> GetCommitsAsync(string repositoryPath, string branch, int max = 100, CancellationToken ct = default)
+        public Task<IReadOnlyList<GitCommit>> SearchCommitsAsync(string repositoryPath, string branch, string term, int max = 100, CancellationToken ct = default)
+            => GetCommitsAsync(repositoryPath, branch, max, 0, ct);
+
+        public Task<IReadOnlyList<GitCommit>> GetCommitsAsync(string repositoryPath, string branch, int max = 100, int skip = 0, CancellationToken ct = default)
         {
             var now = DateTimeOffset.Now;
             IReadOnlyList<GitCommit> list = new List<GitCommit>
@@ -216,7 +219,7 @@ public static class ScreenshotGenerator
     private sealed class FakeRepositoryCache : IRepositoryCache
     {
         // Sem cache na captura: o fluxo cai no clone direto (o FakeGitService responde).
-        public Task<string?> EnsureCacheAsync(string repositoryUrl, CancellationToken ct = default)
+        public Task<string?> EnsureCacheAsync(string repositoryUrl, IProgress<string>? progress = null, CancellationToken ct = default)
             => Task.FromResult<string?>(null);
     }
 

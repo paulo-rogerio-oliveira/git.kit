@@ -67,8 +67,10 @@ from work folders, so cleanup never touches logs).
 `RepositoryCache` (Core, `IRepositoryCache`) speeds up URL clones: it keeps a
 `git clone --mirror` per remote under `%LOCALAPPDATA%\git.kit\cache`, tracked in
 `cache-index.json`. `EnsureCacheAsync(url)` creates the mirror on first use or
-`remote update --prune`s it thereafter, returning the mirror path (or `null` on any
-failure). `MainViewModel.CloneAsync` then clones the working copy **from the mirror** and
+`fetch --all --prune`s it thereafter, returning the mirror path (or `null` on any
+failure — except cancellation, which is rethrown so the caller doesn't fall back to a
+direct clone the user just aborted). `MainViewModel.CloneAsync` then clones the working
+copy **from the mirror** and
 re-points `origin` to the real URL (so push targets the real remote); on `null` it falls
 back to a direct clone. Cache and logs live outside the `C:\gtk` cleanup scope.
 
@@ -78,7 +80,17 @@ There is **no libgit2 / LibGit2Sharp**. All git access flows through
 `IProcessRunner`/`ProcessRunner`, which runs the `git` executable and captures
 stdout/stderr. `GitService` (implements `IGitService`) is the only place that builds git
 command strings; it raises `CommandExecuted` after every invocation so the UI can log
-each command.
+each command (the UI log and the file log are **off by default**, toggled by the checkbox
+on the Log tab → `MainViewModel.IsLogEnabled` / `GitCommandLogger.Enabled`).
+
+`ProcessRunner` splits output on `\n`, `\r`, or `\r\n` and delivers each line through an
+optional `onOutputLine` callback as it arrives — this is how `git clone --progress`
+percentages reach the status bar (`IProgress<string>` parameters on clone/cache methods).
+Blank lines are preserved in the captured output (commit-message reconstruction depends on
+the subject/body separator). Cancelling the token **kills the git process tree** (no
+orphaned processes) and throws `OperationCanceledException`; `MainViewModel.RunBusyAsync`
+owns one `CancellationTokenSource` per operation, wired to the Cancelar button in the
+status bar.
 
 Critical detail: `ProcessRunner` forces `LC_ALL=C.UTF-8`, `GIT_TERMINAL_PROMPT=0`, and
 `GIT_EDITOR=true` on the child process. This is load-bearing — `GitService` **parses git's
@@ -125,7 +137,9 @@ lives in `MainViewModel` (see `SetRemoteUrlAsync` / `GetRemoteUrlAsync` usage).
 `conflicteditor` command, which extracts index stages itself and **preserves the file's
 original encoding/line endings**. The manual fallback (extracting stages 1/2/3 =
 base/ours/theirs via `IGitService.ExtractConflictStageAsync` and launching
-`TortoiseGitMerge` directly) can alter encoding, so prefer the conflicteditor path.
+`TortoiseGitMerge` directly) also preserves the blob bytes exactly — extraction uses
+`git checkout-index --stage=<n> --temp` (writes straight to a file), never stdout capture,
+which would corrupt binaries/UTF-16 and normalize line endings.
 TortoiseGit executables are auto-located under Program Files or `PATH`; if not found, the
 user is prompted to pick one at first use. Stage convention throughout: **2 = ours =
 destination, 3 = theirs = origin** of the commit being replicated.

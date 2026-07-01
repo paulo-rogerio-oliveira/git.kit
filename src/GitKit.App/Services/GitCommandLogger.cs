@@ -21,6 +21,12 @@ public sealed class GitCommandLogger
     /// <summary>Arquivo de log desta sessão.</summary>
     public string LogFilePath { get; }
 
+    /// <summary>
+    /// Habilita a gravação. Desligado por padrão (acompanha o checkbox de log da
+    /// UI): com o log desabilitado, nenhum arquivo é criado.
+    /// </summary>
+    public bool Enabled { get; set; }
+
     public GitCommandLogger()
     {
         LogDirectory = ResolveLogDirectory();
@@ -32,6 +38,9 @@ public sealed class GitCommandLogger
 
     private void Write(GitCommandResult result)
     {
+        if (!Enabled)
+            return;
+
         try
         {
             var sb = new StringBuilder();

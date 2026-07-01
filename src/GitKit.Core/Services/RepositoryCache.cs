@@ -26,7 +26,7 @@ public sealed class RepositoryCache : IRepositoryCache
         _indexPath = Path.Combine(_cacheRoot, "cache-index.json");
     }
 
-    public async Task<string?> EnsureCacheAsync(string repositoryUrl, CancellationToken ct = default)
+    public async Task<string?> EnsureCacheAsync(string repositoryUrl, IProgress<string>? progress = null, CancellationToken ct = default)
     {
         try
         {
@@ -42,7 +42,7 @@ public sealed class RepositoryCache : IRepositoryCache
             // Cache existente e válido → atualiza (melhor-esforço) e reutiliza.
             if (entry is not null && CacheLooksValid(entry.Path))
             {
-                await _git.UpdateCacheAsync(entry.Path, ct).ConfigureAwait(false);
+                await _git.UpdateCacheAsync(entry.Path, progress, ct).ConfigureAwait(false);
                 entry.Url = url;
                 entry.UpdatedUtc = DateTimeOffset.UtcNow;
                 SaveIndex(index);
@@ -59,7 +59,7 @@ public sealed class RepositoryCache : IRepositoryCache
             var cacheDir = Path.Combine(_cacheRoot, BuildKey(url));
             TryDelete(cacheDir);
 
-            var clone = await _git.CloneMirrorAsync(url, cacheDir, ct).ConfigureAwait(false);
+            var clone = await _git.CloneMirrorAsync(url, cacheDir, progress, ct).ConfigureAwait(false);
             if (!clone.Success)
             {
                 TryDelete(cacheDir);
@@ -75,6 +75,12 @@ public sealed class RepositoryCache : IRepositoryCache
             });
             SaveIndex(index);
             return cacheDir;
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancelamento pedido pelo usuário não é falha de cache: propaga
+            // (senão o chamador recairia num clone direto que ele quis abortar).
+            throw;
         }
         catch
         {
