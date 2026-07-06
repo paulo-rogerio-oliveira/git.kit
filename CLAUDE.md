@@ -17,9 +17,13 @@ branch · Cherry-pick · Processos · Log) offering two GitHub-CLI-based flows:
   **Pull Request** via `gh` with the chosen reviewers.
 - **Cherry-pick** — replicates the *selected* commits onto a chosen target branch.
 
-Both flows are **GitHub-first**: branches/commits/collaborators are listed via `gh`
-(`IGitHubService`/`GitHubService`) **without cloning**; only when the user hits Replicar
-does a **background job** (`BackgroundJobService`) clone and run the replication. Jobs appear
+Both flows accept a **GitHub URL or a local repository path** in the repository field
+(`RepositorySourceResolver`): for a URL, branches/commits/collaborators are listed via `gh`
+(`IGitHubService`/`GitHubService`) **without cloning**; for a local path they're read
+straight from the repo via git, and the real remote (for push/PR) is taken from the repo's
+`origin`. Only when the user hits Replicar does a **background job** (`BackgroundJobService`)
+clone (from the URL/cache, or the local path) and run the replication — re-pointing `origin`
+at the real remote so push/PR go there. Jobs appear
 in the **Processos** tab; clicking one recovers it to the main screen, and on conflict the
 job pauses (`JobStatus.NeedsConflictResolution`) and resumes after the user resolves it in
 the existing conflicts window. `gh` must be installed and authenticated (`gh auth login`).

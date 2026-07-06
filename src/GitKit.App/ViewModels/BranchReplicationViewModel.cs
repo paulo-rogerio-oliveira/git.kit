@@ -18,13 +18,15 @@ namespace GitKit.App.ViewModels;
 /// </summary>
 public sealed class BranchReplicationViewModel : ObservableObject
 {
+    private readonly IGitService _git;
     private readonly IGitHubService _gh;
     private readonly BackgroundJobService _jobs;
     private readonly IDialogService _dialogs;
     private readonly IRecentRepositories _recent;
     private readonly Action _goToProcesses;
+    private readonly RepositorySourceResolver _resolver;
 
-    private GitHubRepo? _repo;
+    private ResolvedRepositorySource? _source;
 
     // Controle de preenchimento automático (não sobrescreve edições manuais).
     private bool _branchNameAuto = true;
@@ -33,14 +35,16 @@ public sealed class BranchReplicationViewModel : ObservableObject
     private string _lastAutoPrTitle = string.Empty;
 
     public BranchReplicationViewModel(
-        IGitHubService gh, BackgroundJobService jobs, IDialogService dialogs,
+        IGitService git, IGitHubService gh, BackgroundJobService jobs, IDialogService dialogs,
         IRecentRepositories recent, Action goToProcesses)
     {
+        _git = git;
         _gh = gh;
         _jobs = jobs;
         _dialogs = dialogs;
         _recent = recent;
         _goToProcesses = goToProcesses;
+        _resolver = new RepositorySourceResolver(git);
 
         // Views filtráveis (por texto digitado) para os combos editáveis.
         RepositoriesView = new CollectionViewSource { Source = Repositories }.View;
@@ -227,32 +231,52 @@ public sealed class BranchReplicationViewModel : ObservableObject
 
     private async Task LoadAsync()
     {
-        var url = RepositorySource.Trim();
-        if (!GitHubRepo.TryParse(url, out var repo))
-        {
-            _dialogs.ShowError("URL inválida",
-                "Informe uma URL de repositório GitHub (ex.: https://github.com/owner/repo).");
-            return;
-        }
+        var input = RepositorySource.Trim();
 
         try
         {
             IsBusy = true;
             IsReady = false;
-            _repo = repo;
 
-            StatusMessage = "Verificando o GitHub CLI (gh)...";
-            if (!await _gh.IsAvailableAsync())
+            StatusMessage = "Identificando o repositório...";
+            var source = await _resolver.ResolveAsync(input);
+            if (source is null)
             {
-                _dialogs.ShowError("gh não encontrado",
-                    "O GitHub CLI (gh) não foi encontrado no PATH. Instale-o e execute 'gh auth login'.");
-                StatusMessage = "GitHub CLI (gh) indisponível.";
+                _dialogs.ShowError("Repositório inválido",
+                    "Informe uma URL de repositório GitHub (https://github.com/owner/repo) ou o caminho de um repositório git local.");
+                StatusMessage = "Repositório inválido.";
                 return;
             }
+            _source = source;
 
-            StatusMessage = $"Consultando branches e colaboradores de {repo.Slug} (sem clonar)...";
-            var branches = await _gh.ListBranchesAsync(repo);
-            var collaborators = await _gh.ListCollaboratorsAsync(repo);
+            IReadOnlyList<string> branches;
+            IReadOnlyList<GitHubUser> collaborators = Array.Empty<GitHubUser>();
+
+            if (source.IsLocal)
+            {
+                StatusMessage = "Lendo os branches do repositório local...";
+                var local = await _git.GetBranchesAsync(source.CloneSource);
+                // Apenas branches LOCAIS: são os que existirão na cópia clonada.
+                branches = local.Where(b => !b.IsRemote).Select(b => b.Name)
+                    .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+                // Colaboradores só quando o repo local tem remote GitHub e o gh está disponível.
+                if (source.GhRepo is not null && await _gh.IsAvailableAsync())
+                    collaborators = await _gh.ListCollaboratorsAsync(source.GhRepo);
+            }
+            else
+            {
+                if (!await _gh.IsAvailableAsync())
+                {
+                    _dialogs.ShowError("gh não encontrado",
+                        "O GitHub CLI (gh) não foi encontrado no PATH. Instale-o e execute 'gh auth login'.");
+                    StatusMessage = "GitHub CLI (gh) indisponível.";
+                    return;
+                }
+
+                StatusMessage = $"Consultando branches e colaboradores de {source.GhRepo!.Slug} (sem clonar)...";
+                branches = await _gh.ListBranchesAsync(source.GhRepo);
+                collaborators = await _gh.ListCollaboratorsAsync(source.GhRepo);
+            }
 
             Branches.Clear();
             foreach (var branch in branches)
@@ -264,7 +288,7 @@ public sealed class BranchReplicationViewModel : ObservableObject
 
             if (Branches.Count == 0)
             {
-                StatusMessage = "Nenhum branch retornado. Verifique a autenticação do gh (gh auth status).";
+                StatusMessage = "Nenhum branch encontrado no repositório.";
                 return;
             }
 
@@ -273,16 +297,19 @@ public sealed class BranchReplicationViewModel : ObservableObject
                 .FirstOrDefault(c => Branches.Any(b => b.Equals(c, StringComparison.OrdinalIgnoreCase)))
                 ?? string.Empty;
 
-            _recent.Add(url);
-            if (!Repositories.Contains(url))
-                Repositories.Insert(0, url);
+            _recent.Add(input);
+            if (!Repositories.Contains(input))
+                Repositories.Insert(0, input);
             IsReady = true;
-            StatusMessage = $"{Branches.Count} branch(es) e {Reviewers.Count} colaborador(es). Escolha origem, destino e revisores.";
+            var reviewersNote = source.IsLocal && source.GhRepo is null
+                ? "repositório local sem remote GitHub — sem revisores/PR"
+                : $"{Reviewers.Count} colaborador(es)";
+            StatusMessage = $"{Branches.Count} branch(es), {reviewersNote}. Escolha origem, destino e revisores.";
         }
         catch (Exception ex)
         {
-            _dialogs.ShowError("Falha ao consultar o GitHub", ex.Message);
-            StatusMessage = "Falha ao consultar o GitHub.";
+            _dialogs.ShowError("Falha ao consultar o repositório", ex.Message);
+            StatusMessage = "Falha ao consultar o repositório.";
         }
         finally
         {
@@ -291,7 +318,7 @@ public sealed class BranchReplicationViewModel : ObservableObject
     }
 
     private bool CanReplicate()
-        => !IsBusy && IsReady && _repo is not null
+        => !IsBusy && IsReady && _source is not null
            && !string.IsNullOrWhiteSpace(SourceBranch)
            && Branches.Any(b => b.Equals(SourceBranch.Trim(), StringComparison.OrdinalIgnoreCase))
            && !string.IsNullOrWhiteSpace(Destination)
@@ -300,13 +327,13 @@ public sealed class BranchReplicationViewModel : ObservableObject
 
     private Task ReplicateAsync()
     {
-        if (_repo is null || string.IsNullOrWhiteSpace(SourceBranch) || string.IsNullOrWhiteSpace(Destination))
+        if (_source is null || string.IsNullOrWhiteSpace(SourceBranch) || string.IsNullOrWhiteSpace(Destination))
             return Task.CompletedTask;
 
         var reviewers = Reviewers.Where(r => r.IsSelected).Select(r => r.Login).ToArray();
 
         var job = _jobs.StartBranchReplication(
-            RepositorySource.Trim(), _repo, SourceBranch.Trim(), NewBranchName.Trim(), Destination.Trim(),
+            _source, SourceBranch.Trim(), NewBranchName.Trim(), Destination.Trim(),
             reviewers, PrTitle, PrBody);
 
         StatusMessage = $"Processo iniciado em background: {job.Title}.";

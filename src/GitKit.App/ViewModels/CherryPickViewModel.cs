@@ -17,23 +17,27 @@ public sealed class CherryPickViewModel : ObservableObject
 {
     private const int CommitPageSize = 100;
 
+    private readonly IGitService _git;
     private readonly IGitHubService _gh;
     private readonly BackgroundJobService _jobs;
     private readonly IDialogService _dialogs;
     private readonly IRecentRepositories _recent;
     private readonly Action _goToProcesses;
+    private readonly RepositorySourceResolver _resolver;
 
-    private GitHubRepo? _repo;
+    private ResolvedRepositorySource? _source;
 
     public CherryPickViewModel(
-        IGitHubService gh, BackgroundJobService jobs, IDialogService dialogs,
+        IGitService git, IGitHubService gh, BackgroundJobService jobs, IDialogService dialogs,
         IRecentRepositories recent, Action goToProcesses)
     {
+        _git = git;
         _gh = gh;
         _jobs = jobs;
         _dialogs = dialogs;
         _recent = recent;
         _goToProcesses = goToProcesses;
+        _resolver = new RepositorySourceResolver(git);
 
         // Views filtráveis (por texto digitado) para os combos editáveis. Origem e
         // destino usam views INDEPENDENTES sobre Branches para não interferirem entre si.
@@ -177,43 +181,58 @@ public sealed class CherryPickViewModel : ObservableObject
 
     private async Task LoadBranchesAsync()
     {
-        var url = RepositorySource.Trim();
-        if (!GitHubRepo.TryParse(url, out var repo))
-        {
-            _dialogs.ShowError("URL inválida",
-                "Informe uma URL de repositório GitHub (ex.: https://github.com/owner/repo).");
-            return;
-        }
+        var input = RepositorySource.Trim();
 
         try
         {
             IsBusy = true;
-            _repo = repo;
 
-            if (!await _gh.IsAvailableAsync())
+            StatusMessage = "Identificando o repositório...";
+            var source = await _resolver.ResolveAsync(input);
+            if (source is null)
             {
-                _dialogs.ShowError("gh não encontrado",
-                    "O GitHub CLI (gh) não foi encontrado no PATH. Instale-o e execute 'gh auth login'.");
-                StatusMessage = "GitHub CLI (gh) indisponível.";
+                _dialogs.ShowError("Repositório inválido",
+                    "Informe uma URL de repositório GitHub (https://github.com/owner/repo) ou o caminho de um repositório git local.");
+                StatusMessage = "Repositório inválido.";
                 return;
             }
+            _source = source;
 
-            StatusMessage = $"Consultando branches de {repo.Slug} (sem clonar)...";
-            var branches = await _gh.ListBranchesAsync(repo);
+            IReadOnlyList<string> branches;
+            if (source.IsLocal)
+            {
+                StatusMessage = "Lendo os branches do repositório local...";
+                var local = await _git.GetBranchesAsync(source.CloneSource);
+                branches = local.Where(b => !b.IsRemote).Select(b => b.Name)
+                    .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            }
+            else
+            {
+                if (!await _gh.IsAvailableAsync())
+                {
+                    _dialogs.ShowError("gh não encontrado",
+                        "O GitHub CLI (gh) não foi encontrado no PATH. Instale-o e execute 'gh auth login'.");
+                    StatusMessage = "GitHub CLI (gh) indisponível.";
+                    return;
+                }
+
+                StatusMessage = $"Consultando branches de {source.GhRepo!.Slug} (sem clonar)...";
+                branches = await _gh.ListBranchesAsync(source.GhRepo);
+            }
 
             Branches.Clear();
             foreach (var branch in branches)
                 Branches.Add(branch);
 
-            _recent.Add(url);
-            if (!Repositories.Contains(url))
-                Repositories.Insert(0, url);
+            _recent.Add(input);
+            if (!Repositories.Contains(input))
+                Repositories.Insert(0, input);
             StatusMessage = $"{Branches.Count} branch(es). Selecione a origem e carregue os commits.";
         }
         catch (Exception ex)
         {
-            _dialogs.ShowError("Falha ao consultar o GitHub", ex.Message);
-            StatusMessage = "Falha ao consultar o GitHub.";
+            _dialogs.ShowError("Falha ao consultar o repositório", ex.Message);
+            StatusMessage = "Falha ao consultar o repositório.";
         }
         finally
         {
@@ -223,14 +242,16 @@ public sealed class CherryPickViewModel : ObservableObject
 
     private async Task LoadCommitsAsync()
     {
-        if (_repo is null || string.IsNullOrWhiteSpace(SourceBranch))
+        if (_source is null || string.IsNullOrWhiteSpace(SourceBranch))
             return;
 
         try
         {
             IsBusy = true;
-            StatusMessage = $"Consultando commits de '{SourceBranch}' (sem clonar)...";
-            var commits = await _gh.ListCommitsAsync(_repo, SourceBranch.Trim(), CommitPageSize);
+            StatusMessage = $"Consultando commits de '{SourceBranch}'...";
+            var commits = _source.IsLocal
+                ? await _git.GetCommitsAsync(_source.CloneSource, SourceBranch.Trim(), CommitPageSize)
+                : await _gh.ListCommitsAsync(_source.GhRepo!, SourceBranch.Trim(), CommitPageSize);
 
             Commits.Clear();
             foreach (var commit in commits)
@@ -250,14 +271,14 @@ public sealed class CherryPickViewModel : ObservableObject
     }
 
     private bool CanReplicate()
-        => !IsBusy && _repo is not null
+        => !IsBusy && _source is not null
            && !string.IsNullOrWhiteSpace(SourceBranch)
            && !string.IsNullOrWhiteSpace(TargetBranch)
            && Commits.Any(c => c.IsSelected);
 
     private Task ReplicateAsync()
     {
-        if (_repo is null || string.IsNullOrWhiteSpace(SourceBranch))
+        if (_source is null || string.IsNullOrWhiteSpace(SourceBranch))
             return Task.CompletedTask;
 
         // Ordem cronológica (mais antigo → mais novo) para o cherry-pick sequencial.
@@ -271,7 +292,7 @@ public sealed class CherryPickViewModel : ObservableObject
             return Task.CompletedTask;
 
         var job = _jobs.StartCherryPick(
-            RepositorySource.Trim(), _repo, SourceBranch.Trim(), TargetBranch.Trim(), selected);
+            _source, SourceBranch.Trim(), TargetBranch.Trim(), selected);
 
         StatusMessage = $"Processo iniciado em background: {job.Title}.";
         _goToProcesses();

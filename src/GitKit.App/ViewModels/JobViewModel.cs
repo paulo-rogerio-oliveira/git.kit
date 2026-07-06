@@ -111,7 +111,12 @@ public sealed class JobViewModel : ObservableObject
 
     // ----- Contexto de execução/retomada (não vinculado diretamente à UI) -----
 
+    /// <summary>Origem do clone: URL GitHub ou caminho local do repositório.</summary>
     public string RepositoryUrl { get; init; } = string.Empty;
+    /// <summary>Remote real para push/PR (pode diferir de <see cref="RepositoryUrl"/> em repos locais).</summary>
+    public string RemoteUrl { get; init; } = string.Empty;
+    /// <summary>True quando a origem informada é um caminho local.</summary>
+    public bool IsLocalSource { get; init; }
     public GitHubRepo? GhRepo { get; init; }
     public string SourceBranch { get; init; } = string.Empty;
     public ReplicationMode Mode { get; init; } = ReplicationMode.CherryPick;
@@ -152,9 +157,10 @@ public sealed class JobViewModel : ObservableObject
             var branch = PushBranch;
             if (string.IsNullOrWhiteSpace(branch))
                 return "—";
-            return string.IsNullOrWhiteSpace(RepositoryUrl)
+            var remote = string.IsNullOrWhiteSpace(RemoteUrl) ? RepositoryUrl : RemoteUrl;
+            return string.IsNullOrWhiteSpace(remote)
                 ? $"origin/{branch}"
-                : $"origin/{branch}  ({RepositoryUrl})";
+                : $"origin/{branch}  ({remote})";
         }
     }
 

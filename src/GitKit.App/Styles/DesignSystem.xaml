@@ -38,41 +38,41 @@
     <!-- ===== Tipografia base ===== -->
     <Style TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}" />
-        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontSize" Value="12" />
         <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
         <Setter Property="TextOptions.TextFormattingMode" Value="Ideal" />
     </Style>
 
     <Style x:Key="Typo.Display" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}" />
-        <Setter Property="FontSize" Value="26" />
+        <Setter Property="FontSize" Value="22" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
     </Style>
 
     <Style x:Key="Typo.Tagline" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}" />
-        <Setter Property="FontSize" Value="17" />
+        <Setter Property="FontSize" Value="15" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
     </Style>
 
     <Style x:Key="Typo.Body" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}" />
-        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontSize" Value="12" />
         <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
     </Style>
 
     <Style x:Key="Typo.Caption" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}" />
-        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontSize" Value="11" />
         <Setter Property="Foreground" Value="{StaticResource InkMuted48Brush}" />
     </Style>
 
     <!-- Rótulos de campo -> caption-strong -->
     <Style TargetType="Label">
         <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}" />
-        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontSize" Value="11" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Foreground" Value="{StaticResource InkMuted80Brush}" />
         <Setter Property="Padding" Value="2,0,0,4" />
@@ -82,7 +82,7 @@
     <!-- Base pílula reutilizável (template com estado pressed = scale(0.95)) -->
     <Style x:Key="PillButtonBase" TargetType="Button">
         <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}" />
-        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontSize" Value="12" />
         <Setter Property="Height" Value="32" />
         <Setter Property="MinWidth" Value="88" />
         <Setter Property="Padding" Value="18,0" />
@@ -145,7 +145,7 @@
     <Style x:Key="SmallSecondaryButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
         <Setter Property="Height" Value="28" />
         <Setter Property="MinWidth" Value="72" />
-        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontSize" Value="11" />
         <Setter Property="Padding" Value="12,0" />
     </Style>
 
@@ -155,7 +155,7 @@
     <!-- ===== TextBox ===== -->
     <Style TargetType="TextBox">
         <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}" />
-        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontSize" Value="12" />
         <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
         <Setter Property="Background" Value="{StaticResource CanvasBrush}" />
         <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
@@ -193,7 +193,7 @@
     <!-- Painel de log/código: superfície escura (tile) com texto claro monoespaçado. -->
     <Style x:Key="CodeTextBox" TargetType="TextBox">
         <Setter Property="FontFamily" Value="Consolas" />
-        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontSize" Value="12" />
         <Setter Property="Foreground" Value="#dcdcdc" />
         <Setter Property="Background" Value="#1d1d1f" />
         <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
@@ -235,7 +235,7 @@
 
     <Style TargetType="ComboBoxItem">
         <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}" />
-        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontSize" Value="12" />
         <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
         <Setter Property="Padding" Value="10,7" />
         <Setter Property="Template">
@@ -259,7 +259,7 @@
 
     <Style TargetType="ComboBox">
         <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}" />
-        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontSize" Value="12" />
         <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
         <Setter Property="Background" Value="{StaticResource CanvasBrush}" />
         <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
@@ -345,7 +345,7 @@
 
     <Style TargetType="TabItem">
         <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}" />
-        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontSize" Value="12" />
         <Setter Property="Foreground" Value="{StaticResource InkMuted48Brush}" />
         <Setter Property="Template">
             <Setter.Value>
@@ -373,7 +373,7 @@
     <!-- ===== DataGrid ===== -->
     <Style TargetType="DataGrid">
         <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}" />
-        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontSize" Value="12" />
         <Setter Property="Background" Value="{StaticResource CanvasBrush}" />
         <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
         <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
@@ -391,7 +391,7 @@
 
     <Style TargetType="DataGridColumnHeader">
         <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}" />
-        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontSize" Value="11" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Foreground" Value="{StaticResource InkMuted80Brush}" />
         <Setter Property="Background" Value="{StaticResource ParchmentBrush}" />
@@ -428,7 +428,7 @@
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{StaticResource InkMuted48Brush}" />
         <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}" />
-        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontSize" Value="11" />
     </Style>
 
     <!-- ===== ProgressBar ===== -->

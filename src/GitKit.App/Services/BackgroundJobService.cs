@@ -43,14 +43,16 @@ public sealed class BackgroundJobService
     // ----- Início dos jobs -----
 
     public JobViewModel StartBranchReplication(
-        string repositoryUrl, GitHubRepo repo, string sourceBranch, string newBranch, string? targetBranch,
+        ResolvedRepositorySource source, string sourceBranch, string newBranch, string? targetBranch,
         IReadOnlyList<string> reviewers, string prTitle, string prBody)
     {
         var targetLabel = string.IsNullOrWhiteSpace(targetBranch) ? "(auto)" : targetBranch;
         var job = new JobViewModel(JobKind.BranchReplication, $"Replicar '{sourceBranch}' → '{targetLabel}'")
         {
-            RepositoryUrl = repositoryUrl,
-            GhRepo = repo,
+            RepositoryUrl = source.CloneSource,
+            RemoteUrl = source.RemoteUrl,
+            IsLocalSource = source.IsLocal,
+            GhRepo = source.GhRepo,
             SourceBranch = sourceBranch,
             NewBranch = string.IsNullOrWhiteSpace(newBranch) ? $"{sourceBranch}-replicado" : newBranch.Trim(),
             RequestedTarget = string.IsNullOrWhiteSpace(targetBranch) ? null : targetBranch.Trim(),
@@ -66,13 +68,15 @@ public sealed class BackgroundJobService
     }
 
     public JobViewModel StartCherryPick(
-        string repositoryUrl, GitHubRepo repo, string sourceBranch, string targetBranch,
+        ResolvedRepositorySource source, string sourceBranch, string targetBranch,
         IReadOnlyList<GitCommit> commits)
     {
         var job = new JobViewModel(JobKind.CherryPick, $"Cherry-pick ({commits.Count}) → '{targetBranch}'")
         {
-            RepositoryUrl = repositoryUrl,
-            GhRepo = repo,
+            RepositoryUrl = source.CloneSource,
+            RemoteUrl = source.RemoteUrl,
+            IsLocalSource = source.IsLocal,
+            GhRepo = source.GhRepo,
             SourceBranch = sourceBranch,
             TargetBranch = targetBranch.Trim(),
             Mode = ReplicationMode.CherryPick,
@@ -105,13 +109,6 @@ public sealed class BackgroundJobService
         var ct = job.Cts.Token;
         try
         {
-            job.MarkRunning("Validando GitHub CLI (gh)...");
-            if (!await _gh.IsAvailableAsync(ct))
-            {
-                job.MarkFailed("GitHub CLI (gh) não encontrado no PATH. Instale o gh e faça 'gh auth login'.");
-                return;
-            }
-
             var repoPath = await CloneWorkingCopyAsync(job, ct);
             if (repoPath is null)
                 return; // já marcado como falho
@@ -189,6 +186,15 @@ public sealed class BackgroundJobService
             return;
         }
 
+        // Sem repositório GitHub (repo local sem remote GitHub): não há como abrir PR.
+        if (job.GhRepo is null)
+        {
+            job.MarkCompleted(
+                $"Branch '{job.NewBranch}' enviado para {job.PushUpstream}. " +
+                "Sem repositório GitHub: a Pull Request não foi criada.");
+            return;
+        }
+
         job.Report($"Criando Pull Request para '{job.TargetBranchName}'...");
         var pr = await _gh.CreatePullRequestAsync(
             job.WorkingDir, job.TargetBranchName!, job.NewBranch, job.PrTitle, job.PrBody, job.Reviewers, ct);
@@ -213,13 +219,6 @@ public sealed class BackgroundJobService
         var ct = job.Cts.Token;
         try
         {
-            job.MarkRunning("Validando GitHub CLI (gh)...");
-            if (!await _gh.IsAvailableAsync(ct))
-            {
-                job.MarkFailed("GitHub CLI (gh) não encontrado no PATH. Instale o gh e faça 'gh auth login'.");
-                return;
-            }
-
             var repoPath = await CloneWorkingCopyAsync(job, ct);
             if (repoPath is null)
                 return;
@@ -385,48 +384,44 @@ public sealed class BackgroundJobService
 
     private async Task<string?> CloneWorkingCopyAsync(JobViewModel job, CancellationToken ct)
     {
-        var url = job.RepositoryUrl;
+        var cloneSource = job.RepositoryUrl;   // URL GitHub ou caminho local
+        var remoteUrl = string.IsNullOrWhiteSpace(job.RemoteUrl) ? cloneSource : job.RemoteUrl;
         var target = _workspace.CreateWorkFolder();
 
         var cacheProgress = new Progress<string>(line => job.Report($"Cache: {line}"));
         var cloneProgress = new Progress<string>(line => job.Report($"Clone: {line}"));
 
-        job.Report("Atualizando cache local do repositório...");
-        var cachePath = await _cache.EnsureCacheAsync(url, cacheProgress, ct);
-
-        GitCommandResult result;
-        if (cachePath is not null)
+        // O cache (espelho) só faz sentido para URLs remotas. Repos locais são clonados direto.
+        string? cachePath = null;
+        if (!job.IsLocalSource)
         {
-            job.Report("Clonando a partir do cache local...");
-            result = await _git.CloneAsync(cachePath, target, cloneProgress, ct);
-            if (result.Success)
-            {
-                // Reaponta o origin para o remote REAL: o push (cherry-pick e replicação
-                // de branch) precisa ir ao repositório remoto, não ao espelho local.
-                var setRemote = await _git.SetRemoteUrlAsync(target, url, ct);
-                if (!setRemote.Success)
-                {
-                    job.MarkFailed(
-                        "Não foi possível apontar o 'origin' para o remote real; o push não iria ao repositório remoto.\n"
-                        + setRemote.CombinedOutput);
-                    return null;
-                }
-            }
-        }
-        else
-        {
-            job.Report("Clonando repositório...");
-            result = await _git.CloneAsync(url, target, cloneProgress, ct);
+            job.Report("Atualizando cache local do repositório...");
+            cachePath = await _cache.EnsureCacheAsync(cloneSource, cacheProgress, ct);
         }
 
+        job.Report(cachePath is not null ? "Clonando a partir do cache local..." : "Clonando repositório...");
+        var result = await _git.CloneAsync(cachePath ?? cloneSource, target, cloneProgress, ct);
         if (!result.Success)
         {
             job.MarkFailed("Falha ao clonar o repositório:\n" + result.CombinedOutput);
             return null;
         }
 
-        // Garante que o 'git push' (HTTPS) autentique com o token do gh já logado —
-        // caso contrário o push falha silenciosamente por falta de credenciais.
+        // Reaponta o origin para o remote REAL: o push (cherry-pick e replicação de branch)
+        // precisa ir ao repositório remoto (não ao espelho de cache nem ao caminho local).
+        if (!string.IsNullOrWhiteSpace(remoteUrl))
+        {
+            var setRemote = await _git.SetRemoteUrlAsync(target, remoteUrl, ct);
+            if (!setRemote.Success)
+            {
+                job.MarkFailed(
+                    "Não foi possível apontar o 'origin' para o remote real; o push não iria ao destino esperado.\n"
+                    + setRemote.CombinedOutput);
+                return null;
+            }
+        }
+
+        // Garante que o 'git push' (HTTPS GitHub) autentique com o token do gh já logado.
         if (job.GhRepo is not null)
             await _git.ConfigureGhCredentialHelperAsync(target, job.GhRepo.Host, ct);
 

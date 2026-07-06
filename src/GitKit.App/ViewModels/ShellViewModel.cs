@@ -41,8 +41,8 @@ public sealed class ShellViewModel : ObservableObject
         Home = new HomeViewModel(
             goToBranchReplication: () => SelectedTabIndex = TabBranch,
             goToCherryPick: () => SelectedTabIndex = TabCherryPick);
-        BranchReplication = new BranchReplicationViewModel(gh, jobs, dialogs, recent, () => SelectedTabIndex = TabProcesses);
-        CherryPick = new CherryPickViewModel(gh, jobs, dialogs, recent, () => SelectedTabIndex = TabProcesses);
+        BranchReplication = new BranchReplicationViewModel(git, gh, jobs, dialogs, recent, () => SelectedTabIndex = TabProcesses);
+        CherryPick = new CherryPickViewModel(git, gh, jobs, dialogs, recent, () => SelectedTabIndex = TabProcesses);
         Processes = new ProcessesViewModel(jobs, RecoverJobAsync);
 
         // Melhor-esforço em background: popula os combos com os repositórios a que
