@@ -1,0 +1,32 @@
+<UserControl x:Class="GitKit.App.Views.ProcessesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid>
+        <GroupBox Header="Processos em background">
+            <DataGrid ItemsSource="{Binding Jobs}" IsReadOnly="True">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Tipo" Binding="{Binding KindLabel}" Width="120" />
+                    <DataGridTextColumn Header="Processo" Binding="{Binding Title}" Width="2*" />
+                    <DataGridTextColumn Header="Situação" Binding="{Binding StatusLabel}" Width="150" />
+                    <DataGridTextColumn Header="Detalhe" Binding="{Binding StatusText}" Width="2*" />
+                    <DataGridTemplateColumn Header="Ações" Width="220">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="Abrir" Style="{StaticResource SmallSecondaryButton}"
+                                            ToolTip="Abre o popup do processo: ver dados, resolver conflitos e/ou enviar (push)."
+                                            Command="{Binding DataContext.RecoverCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                            CommandParameter="{Binding}" />
+                                    <Button Content="Cancelar" Margin="8,0,0,0" Style="{StaticResource SmallSecondaryButton}"
+                                            Command="{Binding DataContext.CancelCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                            CommandParameter="{Binding}" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+        </GroupBox>
+    </Grid>
+</UserControl>

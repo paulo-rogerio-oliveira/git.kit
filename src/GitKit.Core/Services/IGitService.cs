@@ -5,11 +5,8 @@ namespace GitKit.Core.Services;
 /// <summary>
 /// Operações de alto nível sobre um repositório git, realizadas via CLI.
 /// </summary>
-public interface IGitService
+public interface IGitService : IGitCommandSource
 {
-    /// <summary>Disparado a cada comando git executado (para log na UI).</summary>
-    event Action<GitCommandResult>? CommandExecuted;
-
     /// <summary>Verifica se o git está disponível no PATH.</summary>
     Task<bool> IsGitAvailableAsync(CancellationToken ct = default);
 
@@ -82,6 +79,30 @@ public interface IGitService
     Task<GitCommandResult> AbortReplicationAsync(string repositoryPath, ReplicationMode mode, CancellationToken ct = default);
 
     /// <summary>
+    /// Lista os commits presentes em <paramref name="sourceRef"/> e ausentes em
+    /// <paramref name="baseRef"/> (<c>baseRef..sourceRef</c>), do mais antigo para o
+    /// mais novo — a ordem correta para um cherry-pick sequencial.
+    /// </summary>
+    Task<IReadOnlyList<GitCommit>> ListCommitsBetweenAsync(
+        string repositoryPath, string baseRef, string sourceRef, CancellationToken ct = default);
+
+    /// <summary>
+    /// Replica sequencialmente os <paramref name="commits"/> (a partir de
+    /// <paramref name="startIndex"/>) num novo branch <paramref name="newBranch"/>
+    /// criado a partir de <paramref name="baseRef"/> (quando <paramref name="startIndex"/>
+    /// é 0). Para no primeiro conflito, devolvendo o commit pendente e o índice para
+    /// retomada após a resolução manual (via <see cref="ContinueReplicationAsync"/>).
+    /// </summary>
+    Task<BranchReplicationResult> ReplicateBranchAsync(
+        string repositoryPath,
+        IReadOnlyList<GitCommit> commits,
+        int startIndex,
+        string newBranch,
+        string baseRef,
+        ReplicationMode mode,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Conclui uma replicação após o usuário resolver os conflitos manualmente:
     /// estagia os arquivos resolvidos e finaliza (cherry-pick --continue ou commit).
     /// </summary>
@@ -111,4 +132,12 @@ public interface IGitService
     /// definindo o upstream quando solicitado.
     /// </summary>
     Task<GitCommandResult> PushAsync(string repositoryPath, string branch, bool setUpstream = true, CancellationToken ct = default);
+
+    /// <summary>
+    /// Configura o <c>gh</c> como credential helper do git NESTE repositório (local),
+    /// para que o <c>git push</c> em URLs HTTPS de <paramref name="host"/> (ex.:
+    /// <c>github.com</c>) autentique com o token já logado no gh — evitando que o push
+    /// falhe por falta de credenciais. Inócuo para remotes SSH.
+    /// </summary>
+    Task<GitCommandResult> ConfigureGhCredentialHelperAsync(string repositoryPath, string host, CancellationToken ct = default);
 }

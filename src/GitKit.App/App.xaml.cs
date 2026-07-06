@@ -29,12 +29,14 @@ public partial class App : Application
 
         var processRunner = new ProcessRunner();
         var gitService = new GitService(processRunner);
+        var gitHubService = new GitHubService(processRunner);
 
-        // Registra os comandos git em uma pasta de logs separada (uma por sessão).
+        // Registra os comandos git/gh em uma pasta de logs separada (uma por sessão).
         // Nasce DESABILITADO: só grava quando o usuário marca o checkbox de log
-        // na UI (o MainViewModel liga/desliga via IsLogEnabled).
+        // na UI (o ShellViewModel liga/desliga via IsLogEnabled).
         var gitLogger = new GitCommandLogger();
         gitLogger.Attach(gitService);
+        gitLogger.Attach(gitHubService);
 
         // Limpa em background as pastas de trabalho de sessões anteriores. O snapshot
         // é tirado AGORA, antes de qualquer pasta nova ser criada nesta sessão — assim
@@ -59,7 +61,10 @@ public partial class App : Application
         var dialogs = new DialogService();
         var coordinator = new ConflictResolutionCoordinator(gitService, tortoise, dialogs);
 
-        var viewModel = new MainViewModel(gitService, coordinator, dialogs, workspace, repositoryCache, recentRepositories, gitLogger);
+        // Gerenciador dos processos em background (clone + replicação + PR).
+        var jobs = new BackgroundJobService(gitService, gitHubService, workspace, repositoryCache, dialogs, coordinator);
+
+        var viewModel = new ShellViewModel(gitService, gitHubService, jobs, dialogs, recentRepositories, gitLogger);
 
         var window = new MainWindow { DataContext = viewModel };
         window.Show();

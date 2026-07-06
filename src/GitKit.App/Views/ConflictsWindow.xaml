@@ -1,8 +1,8 @@
 <Window x:Class="GitKit.App.Views.ConflictsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Resolução de conflitos"
-        Height="480" Width="840"
+        Title="Processo — resolução e envio"
+        Height="540" Width="840"
         Background="{StaticResource ParchmentBrush}"
         WindowStartupLocation="CenterOwner">
 
@@ -13,15 +13,51 @@
     <Grid Margin="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" Margin="0,0,0,16" TextWrapping="Wrap" Style="{StaticResource Typo.Body}"
+        <!-- Cabeçalho: status do processo, repositório e onde foi clonado -->
+        <GroupBox Grid.Row="0" Header="{Binding ProcessTitle}" Margin="0,0,0,16">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource Typo.Caption}" Text="Repositório:" Margin="0,0,10,4" />
+                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource Typo.Caption}" Margin="0,0,0,4"
+                           TextTrimming="CharacterEllipsis" Text="{Binding RepositoryUrl}" />
+                <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource Typo.Caption}" Text="Clonado em:" Margin="0,0,10,4" />
+                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Typo.Caption}" Margin="0,0,0,4"
+                           TextTrimming="CharacterEllipsis" Text="{Binding WorkingDir}" />
+                <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource Typo.Caption}" Text="Enviar para:" Margin="0,0,10,4" />
+                <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Typo.Caption}" Margin="0,0,0,4"
+                           TextTrimming="CharacterEllipsis" Text="{Binding Job.PushUpstream}" />
+                <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource Typo.Caption}" Text="Situação:" Margin="0,0,10,4" />
+                <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Typo.Caption}" Margin="0,0,0,4"
+                           Text="{Binding Job.StatusLabel}" />
+                <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource Typo.Caption}" Text="Detalhe:" Margin="0,0,10,0" />
+                <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource Typo.Caption}"
+                           TextWrapping="Wrap" Text="{Binding Job.StatusText}" />
+            </Grid>
+        </GroupBox>
+
+        <TextBlock Grid.Row="1" Margin="0,0,0,16" TextWrapping="Wrap" Style="{StaticResource Typo.Body}"
+                   Visibility="{Binding ShowResolving, Converter={StaticResource BoolToVis}}"
                    Text="Os arquivos abaixo estão em conflito. Clique em 'Resolver' para abrir o TortoiseGitMerge, salve a resolução e marque como resolvido; depois use 'Atualizar status'." />
 
-        <GroupBox Grid.Row="1" Header="Arquivos em conflito">
+        <GroupBox Grid.Row="2" Header="Arquivos em conflito"
+                  Visibility="{Binding ShowResolving, Converter={StaticResource BoolToVis}}">
             <DataGrid ItemsSource="{Binding Items}" BorderThickness="0">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Arquivo" Binding="{Binding Path}" Width="*" />
@@ -40,16 +76,47 @@
             </DataGrid>
         </GroupBox>
 
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,16,0,0">
-            <Button Content="Atualizar status" MinWidth="130" Command="{Binding RefreshCommand}" />
-            <Button Content="Concluir replicação" MinWidth="150" Margin="12,0,0,0"
-                    Style="{StaticResource PrimaryButton}" Command="{Binding ConcludeCommand}" />
+        <!-- Pronto para enviar: todos os conflitos resolvidos -->
+        <Border Grid.Row="2" CornerRadius="{StaticResource RadiusLg}" Padding="20"
+                Background="{StaticResource CanvasBrush}" BorderBrush="{StaticResource HairlineBrush}" BorderThickness="1"
+                Visibility="{Binding ShowPush, Converter={StaticResource BoolToVis}}">
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock Style="{StaticResource Typo.Tagline}" Text="Conflitos resolvidos" />
+                <TextBlock Style="{StaticResource Typo.Body}" TextWrapping="Wrap" Margin="0,8,0,0"
+                           Text="Todos os commits foram aplicados. Envie o branch para o remote (na replicação de branch, a Pull Request também será criada)." />
+            </StackPanel>
+        </Border>
+
+        <!-- Somente visualização: processo em execução/concluído/falho -->
+        <Border Grid.Row="2" CornerRadius="{StaticResource RadiusLg}" Padding="20"
+                Background="{StaticResource CanvasBrush}" BorderBrush="{StaticResource HairlineBrush}" BorderThickness="1"
+                Visibility="{Binding ShowInfo, Converter={StaticResource BoolToVis}}">
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock Style="{StaticResource Typo.Tagline}" Text="{Binding Job.StatusLabel}" />
+                <TextBlock Style="{StaticResource Typo.Body}" TextWrapping="Wrap" Margin="0,8,0,0"
+                           Text="{Binding Job.StatusText}" />
+                <TextBlock Style="{StaticResource Typo.Caption}" TextWrapping="Wrap" Margin="0,12,0,0"
+                           Visibility="{Binding Job.HasPullRequest, Converter={StaticResource BoolToVis}}"
+                           Text="{Binding Job.PullRequestUrl}" />
+            </StackPanel>
+        </Border>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,16,0,0">
+            <Button Content="Atualizar status" MinWidth="130" Command="{Binding RefreshCommand}"
+                    Visibility="{Binding ShowResolving, Converter={StaticResource BoolToVis}}" />
+            <Button Content="Concluir resolução" MinWidth="150" Margin="12,0,0,0"
+                    Style="{StaticResource PrimaryButton}" Command="{Binding ConcludeCommand}"
+                    Visibility="{Binding ShowResolving, Converter={StaticResource BoolToVis}}" />
+            <Button Content="{Binding PushButtonLabel}" MinWidth="180"
+                    Style="{StaticResource PrimaryButton}" Command="{Binding PushCommand}"
+                    Visibility="{Binding ShowPush, Converter={StaticResource BoolToVis}}" />
+            <Button Content="Fechar" MinWidth="100" Margin="12,0,0,0" Command="{Binding CloseCommand}" />
             <ProgressBar Width="120" Height="4" Margin="16,0,0,0" IsIndeterminate="True"
                          VerticalAlignment="Center"
                          Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}" />
         </StackPanel>
 
-        <TextBlock Grid.Row="3" Margin="0,12,0,0" TextWrapping="Wrap" Style="{StaticResource Typo.Caption}"
+        <TextBlock Grid.Row="4" Margin="0,12,0,0" TextWrapping="Wrap" Style="{StaticResource Typo.Caption}"
                    Text="{Binding StatusMessage}" />
     </Grid>
 </Window>

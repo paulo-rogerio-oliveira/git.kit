@@ -1,14 +1,11 @@
 <Window x:Class="GitKit.App.Views.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="git.kit — Replicação de commits entre branches"
-        Height="700" Width="1000" MinHeight="520" MinWidth="820"
+        xmlns:views="clr-namespace:GitKit.App.Views"
+        Title="git.kit — Replicação entre branches"
+        Height="720" Width="1040" MinHeight="560" MinWidth="860"
         Background="{StaticResource ParchmentBrush}"
         WindowStartupLocation="CenterScreen">
-
-    <Window.Resources>
-        <BooleanToVisibilityConverter x:Key="BoolToVis" />
-    </Window.Resources>
 
     <Grid Margin="16">
         <Grid.RowDefinitions>
@@ -16,137 +13,24 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <TabControl Grid.Row="0">
+        <TabControl Grid.Row="0" SelectedIndex="{Binding SelectedTabIndex, Mode=TwoWay}">
 
-            <!-- ===================== Aba: Replicação ===================== -->
-            <TabItem Header="Replicação">
-                <Grid Margin="0,10,0,0">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-
-                    <!-- ===== Repositório ===== -->
-                    <GroupBox Grid.Row="0" Header="Repositório" Margin="0,0,0,10">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-
-                            <Label Grid.Row="0" Grid.Column="0" Content="URL ou caminho" Margin="0,0,12,0" VerticalAlignment="Center" />
-                            <ComboBox Grid.Row="0" Grid.Column="1" Margin="0,0,12,0"
-                                      IsEditable="True" IsTextSearchEnabled="False" StaysOpenOnEdit="True"
-                                      ItemsSource="{Binding RecentRepositories}"
-                                      ToolTip="Informe a URL de clone (https/ssh) ou o caminho de um repositório git local, ou selecione um já utilizado"
-                                      Text="{Binding RepositorySource, UpdateSourceTrigger=PropertyChanged}" />
-                            <Button Grid.Row="0" Grid.Column="2" Content="Iniciar"
-                                    Style="{StaticResource PrimaryButton}" Command="{Binding StartCommand}" />
-
-                            <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Typo.Caption}"
-                                       Margin="0,8,0,0" TextTrimming="CharacterEllipsis">
-                                <TextBlock.Text>
-                                    <MultiBinding StringFormat="Local: {0}      Remote: {1}">
-                                        <Binding Path="RepositoryPath" />
-                                        <Binding Path="RepositoryUrl" />
-                                    </MultiBinding>
-                                </TextBlock.Text>
-                            </TextBlock>
-                        </Grid>
-                    </GroupBox>
-
-                    <!-- ===== Branches ===== -->
-                    <GroupBox Grid.Row="1" Header="Branches" Margin="0,0,0,10"
-                              IsEnabled="{Binding IsRepositoryReady}">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-
-                            <StackPanel Grid.Column="0" Margin="0,0,12,0">
-                                <Label Content="Branch de origem" />
-                                <ComboBox ItemsSource="{Binding SourceBranchesView}" SelectedItem="{Binding SelectedSourceBranch}"
-                                          IsEditable="True" IsTextSearchEnabled="False" StaysOpenOnEdit="True"
-                                          DisplayMemberPath="Name"
-                                          ToolTip="Digite para filtrar os branches de origem"
-                                          Text="{Binding BranchFilter, UpdateSourceTrigger=PropertyChanged}" />
-                            </StackPanel>
-
-                            <StackPanel Grid.Column="1" Margin="0,0,12,0">
-                                <Label Content="Branch de destino (existente ou novo)" />
-                                <ComboBox ItemsSource="{Binding DestinationBranchesView}" IsEditable="True"
-                                          IsTextSearchEnabled="False" StaysOpenOnEdit="True"
-                                          DisplayMemberPath="Name"
-                                          ToolTip="Digite para filtrar/selecionar um branch existente ou informar um novo nome.&#x0a;Nome terminado em 'dev' é criado a partir de develop; caso contrário, de master."
-                                          Text="{Binding DestinationBranch, UpdateSourceTrigger=PropertyChanged}" />
-                            </StackPanel>
-
-                            <Button Grid.Column="2" Content="Atualizar" VerticalAlignment="Bottom"
-                                    Command="{Binding RefreshBranchesCommand}" />
-                        </Grid>
-                    </GroupBox>
-
-                    <!-- ===== Lista de commits ===== -->
-                    <GroupBox Grid.Row="2" Header="Commit a replicar" Margin="0,0,0,0"
-                              IsEnabled="{Binding IsRepositoryReady}">
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="*" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-
-                            <Grid Grid.Row="0" Margin="0,0,0,10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-
-                                <TextBox Grid.Column="0"
-                                         ToolTip="Filtrar os commits carregados por hash, autor ou mensagem"
-                                         Text="{Binding CommitFilter, UpdateSourceTrigger=PropertyChanged}" />
-                                <Button Grid.Column="1" Content="Buscar no histórico" Margin="10,0,0,0"
-                                        Command="{Binding SearchCommitsCommand}"
-                                        ToolTip="Procura o termo em TODO o histórico do branch (mensagem e autor), não só nos commits já carregados" />
-                                <Button Grid.Column="2" Content="Carregar mais" Margin="10,0,0,0"
-                                        Command="{Binding LoadMoreCommitsCommand}"
-                                        ToolTip="Carrega os próximos commits do histórico do branch" />
-                            </Grid>
-
-                            <DataGrid Grid.Row="1" ItemsSource="{Binding CommitsView}" SelectedItem="{Binding SelectedCommit}">
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Hash" Binding="{Binding ShortHash}" Width="80" />
-                                    <DataGridTextColumn Header="Data" Binding="{Binding Date, StringFormat=yyyy-MM-dd HH:mm}" Width="150" />
-                                    <DataGridTextColumn Header="Autor" Binding="{Binding Author}" Width="170" />
-                                    <DataGridTextColumn Header="Mensagem" Binding="{Binding Subject}" Width="*" />
-                                </DataGrid.Columns>
-                            </DataGrid>
-
-                            <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
-                                <Button Content="Replicar commit" MinWidth="150"
-                                        Style="{StaticResource PrimaryButton}" Command="{Binding ReplicateCommand}" />
-                                <Button Content="Resolver conflitos..." Margin="10,0,0,0"
-                                        Command="{Binding ResolveConflictsCommand}"
-                                        Visibility="{Binding PendingManualResolution, Converter={StaticResource BoolToVis}}" />
-                                <Button Content="Enviar branch (push)" Margin="10,0,0,0"
-                                        Style="{StaticResource PrimaryButton}" Command="{Binding PushCommand}"
-                                        Visibility="{Binding CanShowPush, Converter={StaticResource BoolToVis}}" />
-                            </StackPanel>
-                        </Grid>
-                    </GroupBox>
-                </Grid>
+            <TabItem Header="Início">
+                <views:HomeView DataContext="{Binding Home}" Margin="0,10,0,0" />
             </TabItem>
 
-            <!-- ===================== Aba: Log ===================== -->
+            <TabItem Header="Replicar branch">
+                <views:BranchReplicationView DataContext="{Binding BranchReplication}" Margin="0,10,0,0" />
+            </TabItem>
+
+            <TabItem Header="Cherry-pick">
+                <views:CherryPickView DataContext="{Binding CherryPick}" Margin="0,10,0,0" />
+            </TabItem>
+
+            <TabItem Header="Processos">
+                <views:ProcessesView DataContext="{Binding Processes}" Margin="0,10,0,0" />
+            </TabItem>
+
             <TabItem Header="Log">
                 <Grid Margin="0,10,0,0">
                     <Grid.RowDefinitions>
@@ -155,7 +39,7 @@
                     </Grid.RowDefinitions>
 
                     <CheckBox Grid.Row="0" Margin="0,0,0,8"
-                              Content="Registrar log dos comandos git (nesta aba e em arquivo)"
+                              Content="Registrar log dos comandos git/gh (nesta aba e em arquivo)"
                               ToolTip="Desmarcado (padrão), nenhum log é registrado"
                               IsChecked="{Binding IsLogEnabled}" />
                     <TextBox Grid.Row="1" Style="{StaticResource CodeTextBox}"
@@ -165,20 +49,9 @@
 
         </TabControl>
 
-        <!-- ===== Barra de status ===== -->
         <StatusBar Grid.Row="1" Margin="0,8,0,0">
             <StatusBarItem>
-                <ProgressBar Width="120" Height="4" IsIndeterminate="True"
-                             Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}" />
-            </StatusBarItem>
-            <StatusBarItem>
-                <Button Content="Cancelar" Padding="10,2"
-                        Command="{Binding CancelCommand}"
-                        ToolTip="Interrompe a operação git em andamento"
-                        Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}" />
-            </StatusBarItem>
-            <StatusBarItem>
-                <TextBlock Style="{StaticResource Typo.Caption}" Text="{Binding StatusMessage}" />
+                <TextBlock Style="{StaticResource Typo.Caption}" Text="{Binding Processes.Summary}" />
             </StatusBarItem>
         </StatusBar>
     </Grid>

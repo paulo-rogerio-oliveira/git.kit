@@ -24,5 +24,8 @@ public sealed class RelayCommand : ICommand
 
     public bool CanExecute(object? parameter) => _canExecute?.Invoke() ?? true;
 
+    /// <summary>Força a reavaliação do <see cref="CanExecute"/>.</summary>
+    public void NotifyCanExecuteChanged() => CommandManager.InvalidateRequerySuggested();
+
     public void Execute(object? parameter) => _execute();
 }

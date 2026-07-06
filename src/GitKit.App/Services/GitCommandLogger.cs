@@ -33,8 +33,8 @@ public sealed class GitCommandLogger
         LogFilePath = Path.Combine(LogDirectory, $"git-{DateTime.Now:yyyyMMdd-HHmmss}.log");
     }
 
-    /// <summary>Passa a registrar cada comando executado pelo serviço git informado.</summary>
-    public void Attach(IGitService git) => git.CommandExecuted += Write;
+    /// <summary>Passa a registrar cada comando executado pela fonte informada (git ou gh).</summary>
+    public void Attach(IGitCommandSource source) => source.CommandExecuted += Write;
 
     private void Write(GitCommandResult result)
     {

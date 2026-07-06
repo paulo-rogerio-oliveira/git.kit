@@ -1,0 +1,111 @@
+<UserControl x:Class="GitKit.App.Views.BranchReplicationView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Repositório -->
+        <GroupBox Grid.Row="0" Header="Repositório GitHub" Margin="0,0,0,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Label Grid.Column="0" Content="URL" Margin="0,0,12,0" VerticalAlignment="Center" />
+                <ComboBox Grid.Column="1" Margin="0,0,12,0"
+                          IsEditable="True" IsTextSearchEnabled="False" StaysOpenOnEdit="True"
+                          ItemsSource="{Binding RepositoriesView}"
+                          ToolTip="Repositórios a que você tem acesso e os recentes (digite para filtrar). Os branches são consultados via gh, sem clonar."
+                          Text="{Binding RepositorySource, UpdateSourceTrigger=PropertyChanged}" />
+                <Button Grid.Column="2" Content="Carregar"
+                        Style="{StaticResource PrimaryButton}" Command="{Binding LoadCommand}" />
+            </Grid>
+        </GroupBox>
+
+        <!-- Parâmetros -->
+        <GroupBox Grid.Row="1" Header="Parâmetros da replicação" Margin="0,0,0,10"
+                  IsEnabled="{Binding IsReady}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,0,10">
+                    <Label Content="Branch de origem (replica todos os commits)" />
+                    <ComboBox ItemsSource="{Binding BranchesView}"
+                              IsEditable="True" IsTextSearchEnabled="False" StaysOpenOnEdit="True"
+                              Text="{Binding SourceBranch, UpdateSourceTrigger=PropertyChanged}"
+                              ToolTip="Digite para filtrar e selecione o branch de origem." />
+                </StackPanel>
+
+                <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,0,0,10">
+                    <Label Content="Destino / branch da PR (master ou develop)" />
+                    <ComboBox ItemsSource="{Binding DestinationView}"
+                              IsEditable="True" IsTextSearchEnabled="False" StaysOpenOnEdit="True"
+                              Text="{Binding Destination, UpdateSourceTrigger=PropertyChanged}"
+                              ToolTip="Branch para o qual a Pull Request será aberta. Define o prefixo do novo branch." />
+                </StackPanel>
+
+                <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,0,10">
+                    <Label Content="Novo branch (sufixado pelo destino)" />
+                    <TextBox Text="{Binding NewBranchName, UpdateSourceTrigger=PropertyChanged}" />
+                </StackPanel>
+
+                <StackPanel Grid.Row="1" Grid.Column="2" Margin="0,0,0,10">
+                    <Label Content="Título da Pull Request" />
+                    <TextBox Text="{Binding PrTitle, UpdateSourceTrigger=PropertyChanged}" />
+                </StackPanel>
+
+                <!-- Revisores -->
+                <GroupBox Grid.Row="2" Grid.Column="0" Header="Revisores (colaboradores)">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="180">
+                        <ItemsControl ItemsSource="{Binding Reviewers}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <CheckBox Margin="0,3" Content="{Binding Display}"
+                                              IsChecked="{Binding IsSelected, Mode=TwoWay}" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </GroupBox>
+
+                <StackPanel Grid.Row="2" Grid.Column="2">
+                    <Label Content="Descrição da PR (opcional)" />
+                    <TextBox Text="{Binding PrBody, UpdateSourceTrigger=PropertyChanged}"
+                             AcceptsReturn="True" TextWrapping="Wrap" MinHeight="120"
+                             VerticalScrollBarVisibility="Auto"
+                             VerticalContentAlignment="Top" />
+                </StackPanel>
+            </Grid>
+        </GroupBox>
+
+        <!-- Ações + status -->
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Button Grid.Column="0" Content="Replicar e criar PR" MinWidth="180"
+                    Style="{StaticResource PrimaryButton}" Command="{Binding ReplicateCommand}" />
+            <TextBlock Grid.Column="1" Style="{StaticResource Typo.Caption}" Margin="14,0,0,0"
+                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                       Text="{Binding StatusMessage}" />
+        </Grid>
+    </Grid>
+</UserControl>

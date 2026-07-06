@@ -7,58 +7,119 @@ using GitKit.Core.Services;
 
 namespace GitKit.App.ViewModels;
 
+/// <summary>Fase da tela do processo: resolvendo conflitos, pronta para enviar ou só visualização.</summary>
+public enum ConflictResolutionPhase
+{
+    Resolving,
+    ReadyToPush,
+    Info,
+}
+
 /// <summary>
-/// ViewModel do formulário de resolução de conflitos: lista os arquivos em
-/// conflito, permite resolvê-los no TortoiseGitMerge e concluir a replicação.
+/// ViewModel do formulário de resolução de conflitos de um processo em background.
+/// Resolve os conflitos do commit corrente, retoma os commits restantes e, quando
+/// tudo está resolvido, oferece o envio (push) — e a criação da PR, na replicação
+/// de branch — na própria tela.
 /// </summary>
 public sealed class ConflictsViewModel : ObservableObject
 {
     private readonly IGitService _git;
     private readonly ConflictResolutionCoordinator _coordinator;
     private readonly IDialogService _dialogs;
-    private readonly GitCommit _commit;
+    private readonly BackgroundJobService _jobs;
+    private readonly JobViewModel _job;
+
+    private GitCommit? _commit;
     private readonly ReplicationMode _mode;
 
     public ConflictsViewModel(
         IGitService git,
         ConflictResolutionCoordinator coordinator,
         IDialogService dialogs,
-        string repositoryPath,
-        GitCommit commit,
-        ReplicationMode mode,
+        BackgroundJobService jobs,
+        JobViewModel job,
         IReadOnlyList<ConflictEntry> conflicts)
     {
         _git = git;
         _coordinator = coordinator;
         _dialogs = dialogs;
-        RepositoryPath = repositoryPath;
-        _commit = commit;
-        _mode = mode;
+        _jobs = jobs;
+        _job = job;
+
+        RepositoryPath = job.WorkingDir;
+        _commit = job.PendingCommit;
+        _mode = job.Mode;
+        _phase = job.Status switch
+        {
+            JobStatus.NeedsConflictResolution => ConflictResolutionPhase.Resolving,
+            JobStatus.ReadyToPush => ConflictResolutionPhase.ReadyToPush,
+            _ => ConflictResolutionPhase.Info, // qualquer outro status: só visualização
+        };
 
         foreach (var entry in conflicts)
             Items.Add(new ConflictItemViewModel(entry, ResolveItemAsync));
 
-        RefreshCommand = new AsyncRelayCommand(RefreshStatusAsync, () => !IsBusy);
-        ConcludeCommand = new AsyncRelayCommand(ConcludeAsync, () => !IsBusy && AllResolved && Items.Count > 0);
+        RefreshCommand = new AsyncRelayCommand(RefreshStatusAsync, () => !IsBusy && Phase == ConflictResolutionPhase.Resolving);
+        ConcludeCommand = new AsyncRelayCommand(ConcludeAsync,
+            () => !IsBusy && Phase == ConflictResolutionPhase.Resolving && AllResolved && Items.Count > 0);
+        PushCommand = new AsyncRelayCommand(PushAsync, () => !IsBusy && Phase == ConflictResolutionPhase.ReadyToPush);
+        CloseCommand = new RelayCommand(() => RequestClose?.Invoke(this, EventArgs.Empty));
+
+        StatusMessage = _phase switch
+        {
+            ConflictResolutionPhase.ReadyToPush => $"Conflitos resolvidos. Clique em '{PushButtonLabel}'.",
+            ConflictResolutionPhase.Info => _job.StatusText,
+            _ => StatusMessage,
+        };
     }
 
     public string RepositoryPath { get; }
+
+    /// <summary>O processo em background, para exibir seus dados (status/detalhe) ao vivo.</summary>
+    public JobViewModel Job => _job;
+
+    // ----- Informações do processo (cabeçalho do popup) -----
+    public string ProcessTitle => _job.Title;
+    public string RepositoryUrl => _job.RepositoryUrl;
+    public string WorkingDir => _job.WorkingDir;
 
     public ObservableCollection<ConflictItemViewModel> Items { get; } = new();
 
     public AsyncRelayCommand RefreshCommand { get; }
     public AsyncRelayCommand ConcludeCommand { get; }
+    public AsyncRelayCommand PushCommand { get; }
+    public RelayCommand CloseCommand { get; }
 
     /// <summary>Disparado quando o formulário deve ser fechado.</summary>
     public event EventHandler? RequestClose;
 
-    // ----- Resultado consumido pela MainViewModel após o fechamento -----
-
-    public bool Concluded { get; private set; }
-    public string ResultBranch { get; private set; } = string.Empty;
-    public string ResultMessage { get; private set; } = string.Empty;
-
     // ----- Estado -----
+
+    private ConflictResolutionPhase _phase;
+    public ConflictResolutionPhase Phase
+    {
+        get => _phase;
+        private set
+        {
+            if (SetProperty(ref _phase, value))
+            {
+                OnPropertyChanged(nameof(ShowResolving));
+                OnPropertyChanged(nameof(ShowPush));
+                OnPropertyChanged(nameof(ShowInfo));
+                RefreshCommand.NotifyCanExecuteChanged();
+                ConcludeCommand.NotifyCanExecuteChanged();
+                PushCommand.NotifyCanExecuteChanged();
+            }
+        }
+    }
+
+    public bool ShowResolving => Phase == ConflictResolutionPhase.Resolving;
+    public bool ShowPush => Phase == ConflictResolutionPhase.ReadyToPush;
+    public bool ShowInfo => Phase == ConflictResolutionPhase.Info;
+
+    public string PushButtonLabel => _job.Kind == JobKind.BranchReplication
+        ? "Enviar (push) e criar PR"
+        : "Enviar (push)";
 
     private bool _isBusy;
     public bool IsBusy
@@ -71,6 +132,7 @@ public sealed class ConflictsViewModel : ObservableObject
                 OnPropertyChanged(nameof(IsNotBusy));
                 RefreshCommand.NotifyCanExecuteChanged();
                 ConcludeCommand.NotifyCanExecuteChanged();
+                PushCommand.NotifyCanExecuteChanged();
             }
         }
     }
@@ -101,7 +163,7 @@ public sealed class ConflictsViewModel : ObservableObject
     /// </summary>
     public async Task RefreshStatusAsync()
     {
-        if (IsBusy)
+        if (IsBusy || Phase != ConflictResolutionPhase.Resolving)
             return;
 
         try
@@ -117,7 +179,7 @@ public sealed class ConflictsViewModel : ObservableObject
             ConcludeCommand.NotifyCanExecuteChanged();
 
             StatusMessage = AllResolved
-                ? "Todos os conflitos resolvidos. Clique em 'Concluir replicação'."
+                ? "Todos os conflitos resolvidos. Clique em 'Concluir resolução'."
                 : $"{Items.Count(i => i.IsResolved)} de {Items.Count} resolvido(s).";
         }
         finally
@@ -128,23 +190,21 @@ public sealed class ConflictsViewModel : ObservableObject
 
     private async Task ConcludeAsync()
     {
-        if (!AllResolved)
+        if (Phase != ConflictResolutionPhase.Resolving || !AllResolved || _commit is null)
             return;
 
         try
         {
             IsBusy = true;
-            StatusMessage = "Concluindo replicação...";
+            StatusMessage = "Concluindo a resolução do commit...";
             var result = await _git.ContinueReplicationAsync(RepositoryPath, _commit, _mode);
 
             switch (result.Status)
             {
                 case ReplicationStatus.Success:
                 case ReplicationStatus.AlreadyApplied:
-                    Concluded = true;
-                    ResultBranch = result.BranchName;
-                    ResultMessage = result.Message;
-                    RequestClose?.Invoke(this, EventArgs.Empty);
+                    StatusMessage = "Commit resolvido. Verificando os commits restantes...";
+                    await ContinueJobAsync();
                     break;
 
                 case ReplicationStatus.ConflictsNeedManualResolution:
@@ -157,6 +217,73 @@ public sealed class ConflictsViewModel : ObservableObject
                     StatusMessage = "Falha ao concluir a replicação.";
                     _dialogs.ShowError("Falha ao concluir", result.Message);
                     break;
+            }
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    // Aplica os commits restantes; passa para a fase de push ou recarrega o próximo conflito.
+    private async Task ContinueJobAsync()
+    {
+        var step = await _jobs.ContinueAfterResolutionAsync(_job);
+        switch (step)
+        {
+            case BackgroundJobService.RecoverStep.ReadyToPush:
+                Phase = ConflictResolutionPhase.ReadyToPush;
+                StatusMessage = $"Todos os conflitos resolvidos. Clique em '{PushButtonLabel}'.";
+                break;
+
+            case BackgroundJobService.RecoverStep.MoreConflicts:
+                await LoadCurrentConflictAsync();
+                break;
+
+            default:
+                StatusMessage = _job.StatusText;
+                _dialogs.ShowError("Falha ao retomar", _job.StatusText);
+                RequestClose?.Invoke(this, EventArgs.Empty);
+                break;
+        }
+    }
+
+    // Recarrega a lista de conflitos para o novo commit pendente do job.
+    private async Task LoadCurrentConflictAsync()
+    {
+        _commit = _job.PendingCommit;
+        var conflicts = await _git.GetConflictsAsync(RepositoryPath);
+
+        Items.Clear();
+        foreach (var entry in conflicts)
+            Items.Add(new ConflictItemViewModel(entry, ResolveItemAsync));
+
+        OnPropertyChanged(nameof(AllResolved));
+        ConcludeCommand.NotifyCanExecuteChanged();
+        StatusMessage = $"Novo conflito no commit {_commit?.ShortHash}. Resolva os arquivos e conclua.";
+    }
+
+    private async Task PushAsync()
+    {
+        try
+        {
+            IsBusy = true;
+            StatusMessage = _job.Kind == JobKind.BranchReplication
+                ? "Enviando o branch e criando a Pull Request..."
+                : "Enviando o branch (push)...";
+
+            var ok = await _jobs.FinishAsync(_job);
+            if (ok)
+            {
+                StatusMessage = _job.StatusText;
+                var extra = _job.HasPullRequest ? $"\n\nPR: {_job.PullRequestUrl}" : string.Empty;
+                _dialogs.ShowInfo("Concluído", _job.StatusText + extra);
+                RequestClose?.Invoke(this, EventArgs.Empty);
+            }
+            else
+            {
+                StatusMessage = _job.StatusText;
+                _dialogs.ShowError("Falha ao enviar", _job.StatusText);
             }
         }
         finally

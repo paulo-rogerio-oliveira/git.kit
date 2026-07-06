@@ -231,6 +231,96 @@ public sealed class GitService : IGitService
         return baseInfo is null ? result : result.WithPrefix(baseInfo);
     }
 
+    public async Task<IReadOnlyList<GitCommit>> ListCommitsBetweenAsync(
+        string repositoryPath, string baseRef, string sourceRef, CancellationToken ct = default)
+    {
+        // baseRef..sourceRef = commits presentes em source e ausentes na base;
+        // --reverse os entrega do mais antigo para o mais novo (ordem do cherry-pick).
+        var result = await GitAsync(
+            $"log --reverse \"{baseRef}..{sourceRef}\" --format=\"{LogFormat}\"",
+            repositoryPath, ct).ConfigureAwait(false);
+
+        return result.Success ? ParseCommits(result.StandardOutput) : Array.Empty<GitCommit>();
+    }
+
+    public async Task<BranchReplicationResult> ReplicateBranchAsync(
+        string repositoryPath,
+        IReadOnlyList<GitCommit> commits,
+        int startIndex,
+        string newBranch,
+        string baseRef,
+        ReplicationMode mode,
+        CancellationToken ct = default)
+    {
+        var branch = newBranch.Trim();
+
+        if (startIndex <= 0)
+        {
+            // Árvore limpa antes de começar (mesma garantia de ReplicateCommitAsync).
+            var status = await GitAsync("status --porcelain", repositoryPath, ct).ConfigureAwait(false);
+            if (status.Success && !string.IsNullOrWhiteSpace(status.StandardOutput))
+            {
+                return BranchReplicationResult.Failure(
+                    "A árvore de trabalho possui alterações pendentes. Faça commit/stash antes de replicar.",
+                    repositoryPath, branch, 0);
+            }
+
+            // checkout -B: cria (ou reposiciona) o novo branch a partir da base escolhida.
+            var create = await GitAsync($"checkout -B \"{branch}\" \"{baseRef}\"", repositoryPath, ct).ConfigureAwait(false);
+            if (!create.Success)
+            {
+                return BranchReplicationResult.Failure(
+                    $"Não foi possível criar o branch '{branch}' a partir de '{baseRef}'.\n{create.CombinedOutput}",
+                    repositoryPath, branch, 0);
+            }
+            startIndex = 0;
+        }
+        else
+        {
+            // Retomada: garante que o novo branch continua em checkout.
+            await GitAsync($"checkout \"{branch}\"", repositoryPath, ct).ConfigureAwait(false);
+        }
+
+        if (commits.Count == 0)
+            return BranchReplicationResult.Ok($"Nenhum commit para replicar em '{branch}'.", repositoryPath, branch, 0);
+
+        var replicated = 0;
+        for (var i = startIndex; i < commits.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var commit = commits[i];
+
+            var result = mode switch
+            {
+                ReplicationMode.CherryPick => await CherryPickAsync(repositoryPath, commit, ct).ConfigureAwait(false),
+                ReplicationMode.DiffIntegration => await DiffIntegrationAsync(repositoryPath, commit, ct).ConfigureAwait(false),
+                _ => ReplicationResult.Failure("Estratégia de replicação desconhecida.", repositoryPath),
+            };
+
+            switch (result.Status)
+            {
+                case ReplicationStatus.Success:
+                case ReplicationStatus.AlreadyApplied:
+                    replicated++;
+                    break;
+
+                case ReplicationStatus.ConflictsNeedManualResolution:
+                    return BranchReplicationResult.Conflicts(
+                        $"Conflito ao replicar o commit {commit.ShortHash} ({i + 1}/{commits.Count}) em '{branch}'.\n" +
+                        "Resolva os conflitos e conclua para retomar os commits restantes.",
+                        repositoryPath, branch, commit, i, replicated);
+
+                default:
+                    return BranchReplicationResult.Failure(
+                        $"Falha ao replicar o commit {commit.ShortHash} em '{branch}'.\n{result.Message}",
+                        repositoryPath, branch, replicated);
+            }
+        }
+
+        return BranchReplicationResult.Ok(
+            $"{replicated} commit(s) replicado(s) em '{branch}'.", repositoryPath, branch, replicated);
+    }
+
     /// <summary>
     /// Coloca o branch de destino em checkout. Se ele não existir, cria um novo
     /// branch baseado em <c>develop</c> (nome terminado em "dev") ou <c>master</c>.
@@ -630,5 +720,15 @@ public sealed class GitService : IGitService
     {
         var upstream = setUpstream ? "-u " : string.Empty;
         return GitAsync($"push {upstream}origin \"{branch}\"", repositoryPath, ct);
+    }
+
+    public Task<GitCommandResult> ConfigureGhCredentialHelperAsync(string repositoryPath, string host, CancellationToken ct = default)
+    {
+        // Adiciona o gh como credential helper do host, de forma ADITIVA: um credential
+        // manager que já funcione continua sendo tentado primeiro; o gh entra como
+        // fallback (o usuário já está autenticado no gh). Não removemos helpers
+        // existentes para não quebrar um push que já funcionava.
+        var key = $"credential.https://{host}.helper";
+        return GitAsync($"config --local --add \"{key}\" \"!gh auth git-credential\"", repositoryPath, ct);
     }
 }

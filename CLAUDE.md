@@ -4,10 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**git.kit** is a Windows WPF desktop app (.NET 10, MVVM) that replicates a single commit
-from one branch to another inside a git repository, via **cherry-pick** or **diff
-integration**. When git cannot merge automatically, the user resolves conflicts in
-**TortoiseGitMerge**, then finishes the replication and optionally pushes.
+**git.kit** is a Windows WPF desktop app (.NET 10, MVVM) that replicates commits between
+branches of a git repository, via **cherry-pick** or **diff integration**. When git cannot
+merge automatically, the user resolves conflicts in **TortoiseGitMerge**, then finishes the
+replication and optionally pushes.
+
+The app opens on a **home screen** (`ShellViewModel` hosts a 5-tab shell: Início · Replicar
+branch · Cherry-pick · Processos · Log) offering two GitHub-CLI-based flows:
+- **Replicar branch** — replicates *all* commits of a source branch onto a new branch based
+  on a **user-chosen destination** (the PR target, e.g. `develop`/`master`); the new branch
+  name is suffixed by the destination and the PR title is pre-filled. Then it opens a
+  **Pull Request** via `gh` with the chosen reviewers.
+- **Cherry-pick** — replicates the *selected* commits onto a chosen target branch.
+
+Both flows are **GitHub-first**: branches/commits/collaborators are listed via `gh`
+(`IGitHubService`/`GitHubService`) **without cloning**; only when the user hits Replicar
+does a **background job** (`BackgroundJobService`) clone and run the replication. Jobs appear
+in the **Processos** tab; clicking one recovers it to the main screen, and on conflict the
+job pauses (`JobStatus.NeedsConflictResolution`) and resumes after the user resolves it in
+the existing conflicts window. `gh` must be installed and authenticated (`gh auth login`).
 
 The codebase (comments, XML docs, UI strings, user manual) is written in **Portuguese** —
 match that language when editing existing code and user-facing text.
@@ -51,11 +66,20 @@ Two projects plus tests, wired by manual DI (no container):
 - **`GitKit.Core.Tests`** (xunit) — integration tests against temporary git repos.
 
 Dependency composition happens in `src/GitKit.App/App.xaml.cs::OnStartup` ("poor man's
-DI"): it constructs `ProcessRunner → GitService`, attaches a `GitCommandLogger`, creates a
-`WorkspaceService` and kicks off background cleanup, then builds
-`TortoiseGitLauncher → DialogService → ConflictResolutionCoordinator → MainViewModel` and
-shows `MainWindow`. There is no DI container; add new dependencies by threading them through
-this method.
+DI"): it constructs `ProcessRunner → GitService` **and `GitHubService`**, attaches a
+`GitCommandLogger` to both (`Attach(IGitCommandSource)` — git and gh share the
+`CommandExecuted` event), creates a `WorkspaceService` and kicks off background cleanup, then
+builds `TortoiseGitLauncher → DialogService → ConflictResolutionCoordinator →
+BackgroundJobService → ShellViewModel` and shows `MainWindow`. There is no DI container; add
+new dependencies by threading them through this method.
+
+`ShellViewModel` is the window DataContext and owns the child VMs (`HomeViewModel`,
+`BranchReplicationViewModel`, `CherryPickViewModel`, `ProcessesViewModel`), the unified
+git/gh log, and tab navigation. `BackgroundJobService` runs each replication as a
+`JobViewModel` (in-memory only, one `CancellationTokenSource` per job) and drives the
+clone/replicate/push/PR pipeline plus conflict pause/resume. Branch-replication ranges use
+`GitService.ReplicateBranchAsync` (sequential cherry-pick, resumable via a `startIndex`);
+cherry-pick loops `ReplicateCommitAsync` per selected commit.
 
 `WorkspaceService` owns the temp working copies: short-path root `C:\gtk\<n>` (fallback
 `%TEMP%\gtk`), integer-named folders. At startup, `SnapshotExistingFolders()` is called
@@ -69,10 +93,10 @@ from work folders, so cleanup never touches logs).
 `cache-index.json`. `EnsureCacheAsync(url)` creates the mirror on first use or
 `fetch --all --prune`s it thereafter, returning the mirror path (or `null` on any
 failure — except cancellation, which is rethrown so the caller doesn't fall back to a
-direct clone the user just aborted). `MainViewModel.CloneAsync` then clones the working
-copy **from the mirror** and
-re-points `origin` to the real URL (so push targets the real remote); on `null` it falls
-back to a direct clone. Cache and logs live outside the `C:\gtk` cleanup scope.
+direct clone the user just aborted). `BackgroundJobService.CloneWorkingCopyAsync` then
+clones the working copy **from the mirror** and
+re-points `origin` to the real URL (so push and `gh pr create` target the real remote); on
+`null` it falls back to a direct clone. Cache and logs live outside the `C:\gtk` cleanup scope.
 
 ### git integration is 100% CLI
 
@@ -81,15 +105,16 @@ There is **no libgit2 / LibGit2Sharp**. All git access flows through
 stdout/stderr. `GitService` (implements `IGitService`) is the only place that builds git
 command strings; it raises `CommandExecuted` after every invocation so the UI can log
 each command (the UI log and the file log are **off by default**, toggled by the checkbox
-on the Log tab → `MainViewModel.IsLogEnabled` / `GitCommandLogger.Enabled`).
+on the Log tab → `ShellViewModel.IsLogEnabled` / `GitCommandLogger.Enabled`). `GitHubService`
+is the analogous single place that builds `gh` command strings and raises the same event.
 
 `ProcessRunner` splits output on `\n`, `\r`, or `\r\n` and delivers each line through an
 optional `onOutputLine` callback as it arrives — this is how `git clone --progress`
 percentages reach the status bar (`IProgress<string>` parameters on clone/cache methods).
 Blank lines are preserved in the captured output (commit-message reconstruction depends on
 the subject/body separator). Cancelling the token **kills the git process tree** (no
-orphaned processes) and throws `OperationCanceledException`; `MainViewModel.RunBusyAsync`
-owns one `CancellationTokenSource` per operation, wired to the Cancelar button in the
+orphaned processes) and throws `OperationCanceledException`; each `JobViewModel`
+owns one `CancellationTokenSource`, wired to the Cancelar button in the
 status bar.
 
 Critical detail: `ProcessRunner` forces `LC_ALL=C.UTF-8`, `GIT_TERMINAL_PROMPT=0`, and
@@ -126,9 +151,9 @@ to the destination yields `AlreadyApplied`, not a failure.
 ### Working always on a temporary copy
 
 The app never mutates the user's original repository. A URL is cloned to a unique temp
-folder; a local path is also cloned to temp, and the copy's `origin` is re-pointed at the
-original's real remote URL so `push` targets the true upstream. This clone/re-point logic
-lives in `MainViewModel` (see `SetRemoteUrlAsync` / `GetRemoteUrlAsync` usage).
+folder and the copy's `origin` is re-pointed at the real remote URL so `push` targets the
+true upstream. This clone/re-point logic lives in `BackgroundJobService.CloneWorkingCopyAsync`
+(see `SetRemoteUrlAsync` usage).
 
 ### Conflict resolution & TortoiseGit
 

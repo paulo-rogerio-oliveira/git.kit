@@ -382,6 +382,76 @@ public sealed class GitServiceTests
     }
 
     [Fact]
+    public async Task CherryPick_resolve_conflict_then_push_updates_bare_remote()
+    {
+        // Reproduz o fluxo do cherry-pick com conflito: resolve, conclui e envia (push)
+        // para o remote — o commit resolvido deve chegar ao repositório bare (remoto).
+        var bareDir = Path.Combine(Path.GetTempPath(), "git.kit-cp-remote-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(bareDir);
+        var runner = new ProcessRunner();
+        await runner.RunAsync("git", "init --bare", bareDir);
+
+        using var repo = await TestRepository.CreateAsync();
+        await repo.CommitFileAsync("shared.txt", "base\n", "base");
+        // develop diverge alterando o arquivo.
+        await repo.GitAsync("checkout -b develop");
+        await repo.CommitFileAsync("shared.txt", "develop\n", "muda no develop");
+        // feature altera a MESMA linha de outra forma (conflito com develop).
+        await repo.GitAsync("checkout main");
+        await repo.GitAsync("checkout -b feature");
+        var conflictHash = await repo.CommitFileAsync("shared.txt", "feature\n", "muda na feature");
+
+        // Publica develop no remote bare (destino do cherry-pick).
+        await repo.GitAsync("checkout main");
+        await repo.GitAsync($"remote add origin \"{bareDir}\"");
+        await repo.GitAsync("push origin develop");
+
+        var git = NewService();
+        var commit = new GitCommit(conflictHash, "autor", DateTimeOffset.Now, "muda na feature");
+
+        // Cherry-pick do commit da feature sobre develop → conflito.
+        var result = await git.ReplicateCommitAsync(repo.Path, commit, "develop", ReplicationMode.CherryPick);
+        Assert.Equal(ReplicationStatus.ConflictsNeedManualResolution, result.Status);
+
+        // Usuário resolve e conclui.
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "shared.txt"), "resolvido\n");
+        var concluded = await git.ContinueReplicationAsync(repo.Path, commit, ReplicationMode.CherryPick);
+        Assert.Equal(ReplicationStatus.Success, concluded.Status);
+        Assert.Equal("develop", concluded.BranchName);
+
+        // Push do branch resolvido para o remote.
+        var push = await git.PushAsync(repo.Path, concluded.BranchName);
+        Assert.True(push.Success, push.CombinedOutput);
+
+        try
+        {
+            // O remote bare deve conter o commit resolvido em develop.
+            var top = await runner.RunAsync("git", "log develop -1 --format=%s", bareDir);
+            Assert.Contains("muda na feature", top.StandardOutput);
+        }
+        finally
+        {
+            try { Directory.Delete(bareDir, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task ConfigureGhCredentialHelper_sets_local_helper_for_host()
+    {
+        using var repo = await TestRepository.CreateAsync();
+        await repo.CommitFileAsync("a.txt", "x", "base");
+
+        var git = NewService();
+        var result = await git.ConfigureGhCredentialHelperAsync(repo.Path, "github.com");
+        Assert.True(result.Success, result.CombinedOutput);
+
+        // O helper do gh deve ficar configurado localmente para o host.
+        var helpers = await repo.RunRawAsync("config --local --get-all credential.https://github.com.helper");
+        Assert.True(helpers.Success, helpers.CombinedOutput);
+        Assert.Contains("gh auth git-credential", helpers.StandardOutput);
+    }
+
+    [Fact]
     public async Task Push_sends_branch_to_origin()
     {
         // "Remote" como repositório bare.
@@ -817,5 +887,146 @@ public sealed class GitServiceTests
         {
             Directory.Delete(temp, recursive: true);
         }
+    }
+
+    // ----- Replicação de branch (todos os commits + regra de target) -----
+
+    /// <summary>
+    /// Monta um repo com master/develop e dois branches: um filho de master e outro
+    /// filho de develop. Retorna o repo pronto para os testes de branch.
+    /// </summary>
+    private static async Task<TestRepository> CreateGitflowRepoAsync()
+    {
+        var repo = await TestRepository.CreateAsync();
+        // c1 na base, que vira master.
+        await repo.CommitFileAsync("conflict.txt", "base\n", "c1 base");
+        await repo.GitAsync("branch master");
+
+        // develop = master + um commit próprio.
+        await repo.GitAsync("checkout -b develop master");
+        await repo.CommitFileAsync("conflict.txt", "develop version\n", "develop muda conflict");
+
+        // feature-master = filho de master (não contém o commit de develop).
+        await repo.GitAsync("checkout -b feature-master master");
+        await repo.CommitFileAsync("a.txt", "AAA\n", "feat a");
+        await repo.CommitFileAsync("conflict.txt", "feature version\n", "feat muda conflict");
+        await repo.CommitFileAsync("c.txt", "CCC\n", "feat c");
+
+        // feature-develop = filho de develop.
+        await repo.GitAsync("checkout -b feature-develop develop");
+        await repo.CommitFileAsync("d.txt", "DDD\n", "feat d");
+
+        await repo.GitAsync("checkout master");
+        return repo;
+    }
+
+    [Fact]
+    public async Task ListCommitsBetween_returns_source_only_commits_oldest_first()
+    {
+        using var repo = await CreateGitflowRepoAsync();
+        var git = NewService();
+
+        var commits = await git.ListCommitsBetweenAsync(repo.Path, "develop", "feature-master");
+
+        // develop..feature-master = os 3 commits da feature (nenhum deles em develop).
+        Assert.Equal(3, commits.Count);
+        Assert.Equal("feat a", commits[0].Subject);   // mais antigo primeiro
+        Assert.Equal("feat muda conflict", commits[1].Subject);
+        Assert.Equal("feat c", commits[2].Subject);
+    }
+
+    [Fact]
+    public async Task ReplicateBranch_happy_path_applies_all_commits_onto_new_branch()
+    {
+        using var repo = await TestRepository.CreateAsync();
+        await repo.CommitFileAsync("base.txt", "base\n", "base");
+        await repo.GitAsync("branch develop");
+
+        // Branch de origem com dois commits limpos (arquivos distintos).
+        await repo.GitAsync("checkout -b feature");
+        await repo.CommitFileAsync("f1.txt", "um\n", "feat 1");
+        await repo.CommitFileAsync("f2.txt", "dois\n", "feat 2");
+        await repo.GitAsync("checkout develop");
+
+        var git = NewService();
+        var commits = await git.ListCommitsBetweenAsync(repo.Path, "develop", "feature");
+        Assert.Equal(2, commits.Count);
+
+        var result = await git.ReplicateBranchAsync(
+            repo.Path, commits, 0, "feature-replicado", "develop", ReplicationMode.CherryPick);
+
+        Assert.Equal(ReplicationStatus.Success, result.Status);
+        Assert.Equal(2, result.Replicated);
+        Assert.Equal("feature-replicado", result.BranchName);
+
+        var head = (await repo.RunRawAsync("rev-parse --abbrev-ref HEAD")).StandardOutput.Trim();
+        Assert.Equal("feature-replicado", head);
+        Assert.True(File.Exists(Path.Combine(repo.Path, "f1.txt")));
+        Assert.True(File.Exists(Path.Combine(repo.Path, "f2.txt")));
+    }
+
+    [Fact]
+    public async Task ReplicateBranch_conflict_in_middle_pauses_then_resumes_to_completion()
+    {
+        using var repo = await CreateGitflowRepoAsync();
+        var git = NewService();
+
+        // Replica todos os commits de feature-master (a, conflito, c) sobre develop.
+        var commits = await git.ListCommitsBetweenAsync(repo.Path, "develop", "feature-master");
+        Assert.Equal(3, commits.Count);
+
+        var first = await git.ReplicateBranchAsync(
+            repo.Path, commits, 0, "repl", "develop", ReplicationMode.CherryPick);
+
+        // Para no 2º commit (índice 1), que altera conflict.txt já mexido em develop.
+        Assert.Equal(ReplicationStatus.ConflictsNeedManualResolution, first.Status);
+        Assert.NotNull(first.PendingCommit);
+        Assert.Equal(1, first.NextIndex);
+        Assert.Equal(1, first.Replicated);
+        Assert.Equal("feat muda conflict", first.PendingCommit!.Subject);
+
+        // O 1º commit (a.txt) já foi aplicado antes do conflito.
+        Assert.True(File.Exists(Path.Combine(repo.Path, "a.txt")));
+
+        // Usuário resolve o conflito (simulado) e conclui esse commit.
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "conflict.txt"), "resolvido\n");
+        var continued = await git.ContinueReplicationAsync(repo.Path, first.PendingCommit!, ReplicationMode.CherryPick);
+        Assert.Equal(ReplicationStatus.Success, continued.Status);
+
+        // Retoma a partir do próximo commit (c.txt).
+        var resumed = await git.ReplicateBranchAsync(
+            repo.Path, commits, first.NextIndex + 1, "repl", "develop", ReplicationMode.CherryPick);
+
+        Assert.Equal(ReplicationStatus.Success, resumed.Status);
+        Assert.Equal(1, resumed.Replicated);
+
+        // Estado final: todos os arquivos presentes e conflito resolvido.
+        Assert.True(File.Exists(Path.Combine(repo.Path, "a.txt")));
+        Assert.True(File.Exists(Path.Combine(repo.Path, "c.txt")));
+        Assert.Contains("resolvido", await File.ReadAllTextAsync(Path.Combine(repo.Path, "conflict.txt")));
+
+        var status = await repo.RunRawAsync("status --porcelain");
+        Assert.True(string.IsNullOrWhiteSpace(status.StandardOutput));
+    }
+
+    [Fact]
+    public async Task ReplicateBranch_works_with_space_in_repo_path()
+    {
+        using var repo = await TestRepository.CreateAsync(withSpaceInPath: true);
+        Assert.Contains(" ", repo.Path);
+
+        await repo.CommitFileAsync("base.txt", "base\n", "base");
+        await repo.GitAsync("branch develop");
+        await repo.GitAsync("checkout -b feature");
+        await repo.CommitFileAsync("nova.txt", "conteudo\n", "feat nova");
+        await repo.GitAsync("checkout develop");
+
+        var git = NewService();
+        var commits = await git.ListCommitsBetweenAsync(repo.Path, "develop", "feature");
+        var result = await git.ReplicateBranchAsync(
+            repo.Path, commits, 0, "feature-replicado", "develop", ReplicationMode.CherryPick);
+
+        Assert.Equal(ReplicationStatus.Success, result.Status);
+        Assert.True(File.Exists(Path.Combine(repo.Path, "nova.txt")));
     }
 }
