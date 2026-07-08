@@ -53,6 +53,8 @@ public sealed class BranchReplicationViewModel : ObservableObject
         BranchesView.Filter = o => MatchesText(o, SourceBranch);
         DestinationView = new CollectionViewSource { Source = Branches }.View;
         DestinationView.Filter = o => MatchesText(o, Destination);
+        ReviewersView = new CollectionViewSource { Source = Reviewers }.View;
+        ReviewersView.Filter = FilterReviewer;
 
         LoadCommand = new AsyncRelayCommand(LoadAsync, () => !IsBusy && !string.IsNullOrWhiteSpace(RepositorySource));
         ReplicateCommand = new AsyncRelayCommand(ReplicateAsync, CanReplicate);
@@ -67,16 +69,40 @@ public sealed class BranchReplicationViewModel : ObservableObject
     public ObservableCollection<string> Branches { get; } = new();
     public ObservableCollection<ReviewerOption> Reviewers { get; } = new();
 
-    // Views filtradas exibidas nos combos editáveis.
+    // Views filtradas exibidas nos combos editáveis e na lista de revisores.
     public ICollectionView RepositoriesView { get; }
     public ICollectionView BranchesView { get; }
     public ICollectionView DestinationView { get; }
+    public ICollectionView ReviewersView { get; }
 
     // Filtra strings por substring do termo digitado (vazio = mostra tudo).
     private static bool MatchesText(object item, string term)
     {
         term = term?.Trim() ?? string.Empty;
         return term.Length == 0 || (item is string s && s.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // Filtro dos revisores por login/nome. Os já MARCADOS permanecem visíveis
+    // mesmo fora do termo, para o dev não perder de vista quem selecionou.
+    private bool FilterReviewer(object item)
+    {
+        var term = ReviewerFilter.Trim();
+        if (term.Length == 0)
+            return true;
+
+        return item is ReviewerOption r
+               && (r.IsSelected || r.Display.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private string _reviewerFilter = string.Empty;
+    public string ReviewerFilter
+    {
+        get => _reviewerFilter;
+        set
+        {
+            if (SetProperty(ref _reviewerFilter, value))
+                ReviewersView?.Refresh();
+        }
     }
 
     public AsyncRelayCommand LoadCommand { get; }
@@ -283,6 +309,7 @@ public sealed class BranchReplicationViewModel : ObservableObject
                 Branches.Add(branch);
 
             Reviewers.Clear();
+            ReviewerFilter = string.Empty;
             foreach (var user in collaborators)
                 Reviewers.Add(new ReviewerOption(user));
 

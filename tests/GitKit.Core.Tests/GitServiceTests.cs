@@ -974,6 +974,56 @@ public sealed class GitServiceTests
     }
 
     [Fact]
+    public async Task ListBranchOwnCommits_excludes_commits_inherited_from_original_base()
+    {
+        using var repo = await TestRepository.CreateAsync();
+        // c1 comum a todos.
+        await repo.CommitFileAsync("c1.txt", "c1\n", "c1 base");
+        await repo.GitAsync("branch master");
+
+        // develop nasce de master em c1.
+        await repo.GitAsync("checkout -b develop master");
+        await repo.CommitFileAsync("d1.txt", "d1\n", "d1 develop");
+
+        // master avança com m2 (que develop NÃO tem).
+        await repo.GitAsync("checkout master");
+        await repo.CommitFileAsync("m2.txt", "m2\n", "m2 master");
+
+        // feature nasce de master JÁ COM m2 herdado, e cria f1.
+        await repo.GitAsync("checkout -b feature master");
+        var f1 = await repo.CommitFileAsync("f1.txt", "f1\n", "f1 feature");
+
+        var git = NewService();
+
+        // develop..feature conteria m2 (herdado) + f1 — o método novo deve
+        // devolver APENAS o commit criado no branch (f1).
+        var own = await git.ListBranchOwnCommitsAsync(repo.Path, "feature", "develop");
+
+        var only = Assert.Single(own);
+        Assert.Equal("f1 feature", only.Subject);
+        Assert.Equal(f1, only.Hash);
+    }
+
+    [Fact]
+    public async Task ListBranchOwnCommits_returns_all_branch_commits_oldest_first()
+    {
+        using var repo = await TestRepository.CreateAsync();
+        await repo.CommitFileAsync("base.txt", "base\n", "base");
+        await repo.GitAsync("branch develop");
+
+        await repo.GitAsync("checkout -b feature");
+        await repo.CommitFileAsync("f1.txt", "um\n", "feat 1");
+        await repo.CommitFileAsync("f2.txt", "dois\n", "feat 2");
+
+        var git = NewService();
+        var own = await git.ListBranchOwnCommitsAsync(repo.Path, "feature", "develop");
+
+        Assert.Equal(2, own.Count);
+        Assert.Equal("feat 1", own[0].Subject); // mais antigo primeiro
+        Assert.Equal("feat 2", own[1].Subject);
+    }
+
+    [Fact]
     public async Task ReplicateBranch_happy_path_applies_all_commits_onto_new_branch()
     {
         using var repo = await TestRepository.CreateAsync();

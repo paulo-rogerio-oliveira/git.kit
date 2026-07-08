@@ -87,6 +87,15 @@ public interface IGitService : IGitCommandSource
         string repositoryPath, string baseRef, string sourceRef, CancellationToken ct = default);
 
     /// <summary>
+    /// Lista apenas os commits CRIADOS no próprio branch <paramref name="sourceRef"/>
+    /// (do mais antigo para o mais novo): exclui <paramref name="baseRef"/> e também as
+    /// linhas principais existentes (develop/master/main), para não replicar o que o
+    /// branch apenas HERDOU da base em que foi criado.
+    /// </summary>
+    Task<IReadOnlyList<GitCommit>> ListBranchOwnCommitsAsync(
+        string repositoryPath, string sourceRef, string baseRef, CancellationToken ct = default);
+
+    /// <summary>
     /// Replica sequencialmente os <paramref name="commits"/> (a partir de
     /// <paramref name="startIndex"/>) num novo branch <paramref name="newBranch"/>
     /// criado a partir de <paramref name="baseRef"/> (quando <paramref name="startIndex"/>

@@ -72,16 +72,27 @@
 
                 <!-- Revisores -->
                 <GroupBox Grid.Row="2" Grid.Column="0" Header="Revisores (colaboradores)">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="180">
-                        <ItemsControl ItemsSource="{Binding Reviewers}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <CheckBox Margin="0,3" Content="{Binding Display}"
-                                              IsChecked="{Binding IsSelected, Mode=TwoWay}" />
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <TextBox Grid.Row="0" Margin="0,0,0,8"
+                                 ToolTip="Filtrar os revisores por login ou nome (os já marcados continuam visíveis)"
+                                 Text="{Binding ReviewerFilter, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" MaxHeight="160">
+                            <ItemsControl ItemsSource="{Binding ReviewersView}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <CheckBox Margin="0,3" Content="{Binding Display}"
+                                                  IsChecked="{Binding IsSelected, Mode=TwoWay}" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
                 </GroupBox>
 
                 <StackPanel Grid.Row="2" Grid.Column="2">

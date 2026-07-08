@@ -144,11 +144,13 @@ public sealed class BackgroundJobService
             job.Title = $"Replicar '{job.SourceBranch}' → '{job.TargetBranchName}'";
 
             var sourceRef = $"origin/{job.SourceBranch}";
-            job.Report($"Listando commits de '{job.SourceBranch}' ausentes em '{job.TargetBranchName}'...");
-            var commits = await _git.ListCommitsBetweenAsync(repoPath, targetBase, sourceRef, ct);
+            job.Report($"Listando os commits criados em '{job.SourceBranch}'...");
+            // Apenas os commits CRIADOS no branch: o que ele herdou da base original
+            // (master/develop) não deve ser replicado para o destino.
+            var commits = await _git.ListBranchOwnCommitsAsync(repoPath, sourceRef, targetBase, ct);
             if (commits.Count == 0)
             {
-                job.MarkFailed($"Nenhum commit a replicar: '{job.SourceBranch}' já está contido em '{job.TargetBranchName}'.");
+                job.MarkFailed($"Nenhum commit a replicar: '{job.SourceBranch}' não tem commits próprios fora de '{job.TargetBranchName}'.");
                 return;
             }
 

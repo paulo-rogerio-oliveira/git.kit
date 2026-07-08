@@ -243,6 +243,31 @@ public sealed class GitService : IGitService
         return result.Success ? ParseCommits(result.StandardOutput) : Array.Empty<GitCommit>();
     }
 
+    public async Task<IReadOnlyList<GitCommit>> ListBranchOwnCommitsAsync(
+        string repositoryPath, string sourceRef, string baseRef, CancellationToken ct = default)
+    {
+        // Exclui a base escolhida E as demais linhas principais existentes: sobra
+        // apenas o que foi commitado NO branch (o que ele herdou de master/develop
+        // é alcançável por essas refs e sai da listagem).
+        var excludes = new List<string>();
+        if (!string.IsNullOrWhiteSpace(baseRef))
+            excludes.Add(baseRef.Trim());
+
+        foreach (var candidate in new[] { "develop", "master", "main" })
+        {
+            var resolved = await ResolveExistingRefAsync(repositoryPath, new[] { candidate }, ct).ConfigureAwait(false);
+            if (resolved is not null && !excludes.Contains(resolved, StringComparer.OrdinalIgnoreCase))
+                excludes.Add(resolved);
+        }
+
+        var notArgs = string.Join(" ", excludes.Select(e => $"\"{e}\""));
+        var result = await GitAsync(
+            $"log --reverse \"{sourceRef}\" --not {notArgs} --format=\"{LogFormat}\"",
+            repositoryPath, ct).ConfigureAwait(false);
+
+        return result.Success ? ParseCommits(result.StandardOutput) : Array.Empty<GitCommit>();
+    }
+
     public async Task<BranchReplicationResult> ReplicateBranchAsync(
         string repositoryPath,
         IReadOnlyList<GitCommit> commits,

@@ -250,6 +250,9 @@ public static class ScreenshotGenerator
         public Task<string?> ExtractConflictStageAsync(string repositoryPath, string file, int stage, string destinationPath, CancellationToken ct = default)
             => Task.FromResult<string?>(null);
 
+        public Task<IReadOnlyList<GitCommit>> ListBranchOwnCommitsAsync(string repositoryPath, string sourceRef, string baseRef, CancellationToken ct = default)
+            => GetCommitsAsync(repositoryPath, sourceRef, 100, 0, ct);
+
         public Task<IReadOnlyList<GitCommit>> ListCommitsBetweenAsync(string repositoryPath, string baseRef, string sourceRef, CancellationToken ct = default)
             => GetCommitsAsync(repositoryPath, sourceRef, 100, 0, ct);
 
