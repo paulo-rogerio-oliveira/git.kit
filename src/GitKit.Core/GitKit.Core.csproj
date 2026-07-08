@@ -7,4 +7,11 @@
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Banco SQL embutido (settings, planos técnicos e sessões do agente). -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
+    <!-- Fixa o nativo do SQLite numa versão sem o CVE apontado nas transitivas. -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.0" />
+  </ItemGroup>
+
 </Project>

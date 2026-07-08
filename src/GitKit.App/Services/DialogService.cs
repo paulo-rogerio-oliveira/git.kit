@@ -20,6 +20,16 @@ public sealed class DialogService : IDialogService
         return window.ShowDialog() == true;
     }
 
+    public void ShowAgent(AgentSessionViewModel viewModel)
+    {
+        var window = new AgentWindow
+        {
+            Owner = Application.Current?.MainWindow,
+            DataContext = viewModel,
+        };
+        window.ShowDialog();
+    }
+
     public string? PickFile(string title, string filter)
     {
         var dialog = new OpenFileDialog

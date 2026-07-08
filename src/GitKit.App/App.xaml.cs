@@ -5,6 +5,7 @@ using GitKit.App.Screenshots;
 using GitKit.App.Services;
 using GitKit.App.ViewModels;
 using GitKit.App.Views;
+using GitKit.Core.Data;
 using GitKit.Core.Services;
 
 namespace GitKit.App;
@@ -61,10 +62,22 @@ public partial class App : Application
         var dialogs = new DialogService();
         var coordinator = new ConflictResolutionCoordinator(gitService, tortoise, dialogs);
 
-        // Gerenciador dos processos em background (clone + replicação + PR).
-        var jobs = new BackgroundJobService(gitService, gitHubService, workspace, repositoryCache, dialogs, coordinator);
+        // Banco SQL embutido: settings do DevOps/agente, planos técnicos e transcripts.
+        var dbPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "git.kit", "gitkit.db");
+        var database = new AppDatabase(dbPath);
 
-        var viewModel = new ShellViewModel(gitService, gitHubService, jobs, dialogs, recentRepositories, gitLogger);
+        // Azure DevOps (REST + PAT) e agente Claude (CLI) — configurados pela aba User Stories.
+        var devops = new AzureDevOpsService();
+        var agentRunner = new ClaudeAgentRunner(processRunner);
+
+        // Gerenciador dos processos em background (replicações, cherry-pick e agente).
+        var jobs = new BackgroundJobService(
+            gitService, gitHubService, workspace, repositoryCache, dialogs, coordinator, agentRunner, database);
+
+        var viewModel = new ShellViewModel(
+            gitService, gitHubService, jobs, dialogs, recentRepositories, devops, database, agentRunner, gitLogger);
 
         var window = new MainWindow { DataContext = viewModel };
         window.Show();

@@ -13,6 +13,9 @@ public interface IProcessRunner
     /// <paramref name="onOutputLine"/> (opcional) é invocado a cada linha de
     /// stdout/stderr assim que ela chega — inclusive linhas de progresso
     /// terminadas em <c>\r</c> (ex.: <c>git clone --progress</c>).
+    /// <paramref name="standardInput"/> (opcional): conteúdo escrito no stdin do
+    /// processo (e o stream é fechado em seguida) — usado para passar prompts
+    /// longos sem escaping de linha de comando.
     /// O cancelamento MATA o processo (e sua árvore) e lança
     /// <see cref="OperationCanceledException"/>.
     /// </summary>
@@ -21,5 +24,6 @@ public interface IProcessRunner
         string arguments,
         string? workingDirectory = null,
         Action<string>? onOutputLine = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        string? standardInput = null);
 }

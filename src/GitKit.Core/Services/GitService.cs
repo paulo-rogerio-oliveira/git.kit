@@ -722,6 +722,18 @@ public sealed class GitService : IGitService
         return GitAsync($"push {upstream}origin \"{branch}\"", repositoryPath, ct);
     }
 
+    public Task<GitCommandResult> CheckoutNewBranchAsync(string repositoryPath, string branch, CancellationToken ct = default)
+        => GitAsync($"checkout -B \"{branch.Trim()}\"", repositoryPath, ct);
+
+    public async Task<GitCommandResult> CommitAllAsync(string repositoryPath, string message, CancellationToken ct = default)
+    {
+        var add = await GitAsync("add -A", repositoryPath, ct).ConfigureAwait(false);
+        if (!add.Success)
+            return add;
+
+        return await CommitAsync(repositoryPath, message, ct).ConfigureAwait(false);
+    }
+
     public Task<GitCommandResult> ConfigureGhCredentialHelperAsync(string repositoryPath, string host, CancellationToken ct = default)
     {
         // Adiciona o gh como credential helper do host, de forma ADITIVA: um credential

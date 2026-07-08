@@ -45,10 +45,15 @@ public static class ScreenshotGenerator
         var tortoise = new FakeTortoise();
         var dialogs = new FakeDialogs();
         var coordinator = new ConflictResolutionCoordinator(git, tortoise, dialogs);
-        var jobs = new BackgroundJobService(git, gh, new WorkspaceService(), new FakeRepositoryCache(), dialogs, coordinator);
+        var db = new GitKit.Core.Data.AppDatabase(
+            Path.Combine(Path.GetTempPath(), $"gitkit-shots-{Guid.NewGuid():N}.db"));
+        var agent = new FakeAgentRunner();
+        var devops = new FakeDevOpsService();
+        var jobs = new BackgroundJobService(
+            git, gh, new WorkspaceService(), new FakeRepositoryCache(), dialogs, coordinator, agent, db);
 
         // ---- 1. Tela principal (Replicar branch) populada ----
-        var shell = new ShellViewModel(git, gh, jobs, dialogs, new FakeRecentRepositories());
+        var shell = new ShellViewModel(git, gh, jobs, dialogs, new FakeRecentRepositories(), devops, db, agent);
         shell.BranchReplication.RepositorySource = "https://github.com/exemplo/when.it";
         shell.BranchReplication.LoadCommand.Execute(null);
         Pump();
@@ -87,6 +92,34 @@ public static class ScreenshotGenerator
 
         var conflictsWindow = new ConflictsWindow { DataContext = conflictsVm };
         Capture(conflictsWindow, Path.Combine(outputDirectory, "tela-conflitos.png"), 840, 560);
+
+        // ---- 3. Aba User Stories populada ----
+        shell.UserStories.LoadCommand.Execute(null);
+        Pump();
+        shell.UserStories.SelectedStory = shell.UserStories.Stories.FirstOrDefault();
+        shell.UserStories.TechnicalPlan = "1. Criar o provider de SSO\n2. Ajustar a tela de login\n3. Cobrir com testes";
+        shell.SelectedTabIndex = 3; // aba "User Stories"
+        Pump();
+        var usWindow = new MainWindow { DataContext = shell };
+        Capture(usWindow, Path.Combine(outputDirectory, "tela-user-stories.png"), 1040, 720);
+
+        // ---- 4. Popup do agente ----
+        var agentJob = new JobViewModel(JobKind.AgentTask, "US #1234 — Permitir login com SSO")
+        {
+            RepositoryUrl = "https://github.com/exemplo/when.it",
+            NewBranch = "us/1234",
+            WorkItemId = 1234,
+            WorkItemTitle = "Permitir login com SSO",
+        };
+        agentJob.WorkingDir = @"C:\gtk\5";
+        agentJob.AppendTranscript("sistema", "US #1234: Permitir login com SSO\nPlanejamento técnico: criar o provider de SSO...");
+        agentJob.AppendTranscript("agente", "Entendi o plano. Implementei o provider e ajustei a tela de login.\nDúvida: o SSO deve valer também para a API pública?");
+        agentJob.MarkWaitingInput("O agente aguarda sua interação — abra o processo e responda.");
+        agentJob.ProposedCommitMessage = "Ab#1234 implementa login com SSO corporativo";
+        var agentVm = new AgentSessionViewModel(jobs, agentJob);
+        Pump();
+        var agentWindow = new AgentWindow { DataContext = agentVm };
+        Capture(agentWindow, Path.Combine(outputDirectory, "tela-agente.png"), 900, 640);
     }
 
     private static void Capture(Window window, string path, int width, int height)
@@ -203,6 +236,10 @@ public static class ScreenshotGenerator
 
         public Task<GitCommandResult> ConfigureGhCredentialHelperAsync(string repositoryPath, string host, CancellationToken ct = default) => Task.FromResult(Ok());
 
+        public Task<GitCommandResult> CheckoutNewBranchAsync(string repositoryPath, string branch, CancellationToken ct = default) => Task.FromResult(Ok());
+
+        public Task<GitCommandResult> CommitAllAsync(string repositoryPath, string message, CancellationToken ct = default) => Task.FromResult(Ok());
+
         public Task<IReadOnlyList<string>> GetConflictedFilesAsync(string repositoryPath, CancellationToken ct = default)
             // Mantém estes como "ainda em conflito"; o refresh marca os demais como resolvidos.
             => Task.FromResult((IReadOnlyList<string>)new List<string> { ".gitignore", "README.md" });
@@ -293,9 +330,42 @@ public static class ScreenshotGenerator
         public void Add(string source) { }
     }
 
+    private sealed class FakeAgentRunner : IAgentRunner
+    {
+        public void Configure(AgentOptions options) { }
+        public Task<bool> IsAvailableAsync(CancellationToken ct = default) => Task.FromResult(true);
+
+        public Task<GitCommandResult> RunTurnAsync(string workingDirectory, string prompt, bool continueSession, Action<string>? onOutputLine = null, CancellationToken ct = default)
+            => Task.FromResult(new GitCommandResult("claude -p", 0, "Plano compreendido. Alterações aplicadas.", string.Empty));
+    }
+
+    private sealed class FakeDevOpsService : IAzureDevOpsService
+    {
+        public bool IsConfigured => true;
+        public void Configure(DevOpsSettings settings) { }
+
+        public Task<IReadOnlyList<WorkItem>> GetMyTaskUserStoriesAsync(CancellationToken ct = default)
+            => Task.FromResult((IReadOnlyList<WorkItem>)new[]
+            {
+                new WorkItem(1234, "User Story", "Permitir login com SSO", "Active", "Paulo Oliveira",
+                    "Como usuário quero entrar com SSO corporativo."),
+            });
+
+        public Task<IReadOnlyList<WorkItem>> GetUnassignedUserStoriesAsync(CancellationToken ct = default)
+            => Task.FromResult((IReadOnlyList<WorkItem>)new[]
+            {
+                new WorkItem(1240, "User Story", "Exportar relatório em PDF", "New", string.Empty,
+                    "Como gestor quero exportar o relatório mensal em PDF."),
+            });
+
+        public Task<int> AssignToMeAsync(int userStoryId, string taskTitle, CancellationToken ct = default)
+            => Task.FromResult(9001);
+    }
+
     private sealed class FakeDialogs : IDialogService
     {
         public bool ShowConflicts(ConflictsViewModel viewModel) => false;
+        public void ShowAgent(AgentSessionViewModel viewModel) { }
         public string? PickFile(string title, string filter) => null;
         public void ShowInfo(string title, string message) { }
         public void ShowError(string title, string message) { }

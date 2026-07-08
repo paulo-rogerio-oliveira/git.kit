@@ -14,7 +14,9 @@
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="24" />
+                    <ColumnDefinition Width="20" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="20" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
@@ -22,7 +24,7 @@
                 <GroupBox Grid.Column="0" Header="Replicar branch">
                     <StackPanel>
                         <TextBlock Style="{StaticResource Typo.Body}" TextWrapping="Wrap" Margin="0,0,0,14"
-                                   Text="Replica TODOS os commits de um branch para um novo branch. O alvo (develop/master) é escolhido automaticamente e, ao final, uma Pull Request é criada — você pode indicar revisores." />
+                                   Text="Replica TODOS os commits de um branch para um novo branch, com destino escolhido (develop/master) e Pull Request com revisores ao final." />
                         <Button Content="Replicar branch" HorizontalAlignment="Left"
                                 Style="{StaticResource PrimaryButton}"
                                 Command="{Binding ReplicateBranchCommand}" />
@@ -37,6 +39,17 @@
                         <Button Content="Cherry-pick" HorizontalAlignment="Left"
                                 Style="{StaticResource PrimaryButton}"
                                 Command="{Binding CherryPickCommand}" />
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- User Stories -->
+                <GroupBox Grid.Column="4" Header="User Stories">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource Typo.Body}" TextWrapping="Wrap" Margin="0,0,0,14"
+                                   Text="Carrega suas User Stories do Azure DevOps, atribui a você (com task ativa) e executa o planejamento técnico com o agente Claude — commit padrão Ab#id e push ao final." />
+                        <Button Content="User Stories" HorizontalAlignment="Left"
+                                Style="{StaticResource PrimaryButton}"
+                                Command="{Binding UserStoriesCommand}" />
                     </StackPanel>
                 </GroupBox>
             </Grid>

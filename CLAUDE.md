@@ -9,13 +9,28 @@ branches of a git repository, via **cherry-pick** or **diff integration**. When 
 merge automatically, the user resolves conflicts in **TortoiseGitMerge**, then finishes the
 replication and optionally pushes.
 
-The app opens on a **home screen** (`ShellViewModel` hosts a 5-tab shell: Início · Replicar
-branch · Cherry-pick · Processos · Log) offering two GitHub-CLI-based flows:
+The app opens on a **home screen** (`ShellViewModel` hosts a 6-tab shell: Início · Replicar
+branch · Cherry-pick · User Stories · Processos · Log) offering these flows:
 - **Replicar branch** — replicates *all* commits of a source branch onto a new branch based
   on a **user-chosen destination** (the PR target, e.g. `develop`/`master`); the new branch
   name is suffixed by the destination and the PR title is pre-filled. Then it opens a
   **Pull Request** via `gh` with the chosen reviewers.
 - **Cherry-pick** — replicates the *selected* commits onto a chosen target branch.
+- **User Stories** — loads Azure DevOps user stories (ones where the dev has child Tasks,
+  plus unassigned ones) via **REST + PAT** (`IAzureDevOpsService`/`AzureDevOpsService`;
+  settings kept in the embedded DB). "Atribuir a mim" assigns the US and creates an
+  **Active child Task** for the dev. The dev writes a **technical plan** (persisted per US)
+  and hits Executar (repo + branch fields inline): a background **agent job** clones,
+  creates the branch and runs the **Claude CLI** (`IAgentRunner`/`ClaudeAgentRunner`,
+  turn-based `claude -p` / `--continue`, prompt via **stdin**, default
+  `--permission-mode acceptEdits`). When a turn ends the job goes to
+  `JobStatus.WaitingForInput` and the Shell notifies (sound + status bar); the dev opens
+  the process popup (`AgentWindow`, a console shell over the CLI) to chat. "Solicitar
+  commit" asks the agent for a one-line intent, builds **`Ab#{usId} {intent}`** for
+  approval; on approve the app runs `CommitAllAsync` and enables push (no PR).
+  Persistence lives in an **embedded SQLite DB** (`%LOCALAPPDATA%\git.kit\gitkit.db`,
+  `GitKit.Core/Data/AppDatabase.cs`): DevOps/agent settings (PAT stored in plain text,
+  local machine scope), technical plans, and agent session transcripts.
 
 Both flows accept a **GitHub URL or a local repository path** in the repository field
 (`RepositorySourceResolver`): for a URL, branches/commits/collaborators are listed via `gh`

@@ -12,6 +12,9 @@ public enum JobKind
 
     /// <summary>Cherry-pick dos commits selecionados para um branch alvo.</summary>
     CherryPick,
+
+    /// <summary>Task de uma User Story executada pelo agente (Claude CLI).</summary>
+    AgentTask,
 }
 
 /// <summary>Situação de um processo em background.</summary>
@@ -20,6 +23,8 @@ public enum JobStatus
     Queued,
     Running,
     NeedsConflictResolution,
+    /// <summary>O agente terminou um turno e aguarda a interação do desenvolvedor.</summary>
+    WaitingForInput,
     ReadyToPush,
     Completed,
     Failed,
@@ -53,7 +58,13 @@ public sealed class JobViewModel : ObservableObject
         set => SetOnUi(ref _title, value);
     }
 
-    public string KindLabel => Kind == JobKind.BranchReplication ? "Replicar branch" : "Cherry-pick";
+    public string KindLabel => Kind switch
+    {
+        JobKind.BranchReplication => "Replicar branch",
+        JobKind.CherryPick => "Cherry-pick",
+        JobKind.AgentTask => "Agente (US)",
+        _ => Kind.ToString(),
+    };
 
     private JobStatus _status = JobStatus.Queued;
     public JobStatus Status
@@ -67,6 +78,7 @@ public sealed class JobViewModel : ObservableObject
                 OnPropertyChanged(nameof(CanCancel));
                 OnPropertyChanged(nameof(NeedsResolution));
                 OnPropertyChanged(nameof(CanRecover));
+                OnPropertyChanged(nameof(IsReadyToPush));
                 OnPropertyChanged(nameof(IsFinished));
             }
         }
@@ -77,6 +89,7 @@ public sealed class JobViewModel : ObservableObject
         JobStatus.Queued => "Na fila",
         JobStatus.Running => "Em execução",
         JobStatus.NeedsConflictResolution => "Conflito — resolver",
+        JobStatus.WaitingForInput => "Aguardando interação",
         JobStatus.ReadyToPush => "Pronto para enviar (push)",
         JobStatus.Completed => "Concluído",
         JobStatus.Failed => "Falhou",
@@ -105,8 +118,11 @@ public sealed class JobViewModel : ObservableObject
     public bool HasPullRequest => !string.IsNullOrWhiteSpace(PullRequestUrl);
     public bool CanCancel => Status is JobStatus.Queued or JobStatus.Running;
     public bool NeedsResolution => Status == JobStatus.NeedsConflictResolution;
-    /// <summary>Pode ser trazido de volta à tela: para resolver conflitos ou para enviar (push).</summary>
-    public bool CanRecover => Status is JobStatus.NeedsConflictResolution or JobStatus.ReadyToPush;
+    /// <summary>Pode ser trazido de volta à tela: conflito, interação do agente ou envio.</summary>
+    public bool CanRecover => Status is JobStatus.NeedsConflictResolution or JobStatus.WaitingForInput or JobStatus.ReadyToPush;
+
+    /// <summary>Commit feito; falta apenas o envio (push).</summary>
+    public bool IsReadyToPush => Status == JobStatus.ReadyToPush;
     public bool IsFinished => Status is JobStatus.Completed or JobStatus.Failed or JobStatus.Canceled;
 
     // ----- Contexto de execução/retomada (não vinculado diretamente à UI) -----
@@ -144,10 +160,10 @@ public sealed class JobViewModel : ObservableObject
 
     // ----- Destino do push (upstream) -----
 
-    /// <summary>Branch local que será enviado: novo branch (replicação) ou alvo (cherry-pick).</summary>
-    public string PushBranch => Kind == JobKind.BranchReplication
-        ? NewBranch
-        : (string.IsNullOrWhiteSpace(TargetBranchName) ? TargetBranch : TargetBranchName!);
+    /// <summary>Branch local que será enviado: alvo (cherry-pick) ou o novo branch (demais).</summary>
+    public string PushBranch => Kind == JobKind.CherryPick
+        ? (string.IsNullOrWhiteSpace(TargetBranchName) ? TargetBranch : TargetBranchName!)
+        : NewBranch;
 
     /// <summary>Descrição legível do upstream para onde o push será enviado.</summary>
     public string PushUpstream
@@ -180,11 +196,59 @@ public sealed class JobViewModel : ObservableObject
             dispatcher.Invoke(Raise);
     }
 
+    // ----- Contexto do agente (JobKind.AgentTask) -----
+
+    /// <summary>Id da User Story do Azure DevOps que o agente está resolvendo.</summary>
+    public int WorkItemId { get; init; }
+
+    /// <summary>Título da US (exibição e prompt).</summary>
+    public string WorkItemTitle { get; init; } = string.Empty;
+
+    /// <summary>Id da sessão persistida no banco local (transcript).</summary>
+    public string SessionId { get; init; } = string.Empty;
+
+    private readonly System.Text.StringBuilder _transcript = new();
+
+    /// <summary>Transcript completo da conversa (estilo console).</summary>
+    public string TranscriptText => _transcript.ToString();
+
+    /// <summary>Acrescenta uma mensagem ao transcript (thread-safe para a UI).</summary>
+    public void AppendTranscript(string role, string text)
+    {
+        lock (_transcript)
+        {
+            _transcript.Append("── ").Append(role).AppendLine(" ──");
+            _transcript.AppendLine(text.TrimEnd());
+            _transcript.AppendLine();
+        }
+
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+            OnPropertyChanged(nameof(TranscriptText));
+        else
+            dispatcher.Invoke(() => OnPropertyChanged(nameof(TranscriptText)));
+    }
+
+    // Mensagem de commit proposta (padrão "Ab#{id} {intenção}"), editável pelo dev.
+    private string _proposedCommitMessage = string.Empty;
+    public string ProposedCommitMessage
+    {
+        get => _proposedCommitMessage;
+        set
+        {
+            if (SetOnUi(ref _proposedCommitMessage, value))
+                OnPropertyChanged(nameof(HasCommitProposal));
+        }
+    }
+
+    public bool HasCommitProposal => !string.IsNullOrWhiteSpace(ProposedCommitMessage);
+
     // ----- Transições de estado (sempre marshalladas para a UI thread) -----
 
     public void MarkRunning(string text) => Apply(JobStatus.Running, text);
     public void Report(string text) => StatusText = text;
     public void MarkConflict(string text) => Apply(JobStatus.NeedsConflictResolution, text);
+    public void MarkWaitingInput(string text) => Apply(JobStatus.WaitingForInput, text);
     public void MarkReadyToPush(string text) => Apply(JobStatus.ReadyToPush, text);
     public void MarkFailed(string text) => Apply(JobStatus.Failed, text);
     public void MarkCanceled(string text) => Apply(JobStatus.Canceled, text);

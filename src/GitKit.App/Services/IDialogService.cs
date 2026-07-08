@@ -13,6 +13,9 @@ public interface IDialogService
     /// </summary>
     bool ShowConflicts(ConflictsViewModel viewModel);
 
+    /// <summary>Exibe (modalmente) o popup de interação com o agente (console).</summary>
+    void ShowAgent(AgentSessionViewModel viewModel);
+
     /// <summary>
     /// Abre um seletor de arquivo. Retorna o caminho escolhido ou null se cancelado.
     /// </summary>

@@ -133,6 +133,15 @@ public interface IGitService : IGitCommandSource
     /// </summary>
     Task<GitCommandResult> PushAsync(string repositoryPath, string branch, bool setUpstream = true, CancellationToken ct = default);
 
+    /// <summary>Cria (ou reposiciona) e faz checkout do branch (<c>checkout -B</c>).</summary>
+    Task<GitCommandResult> CheckoutNewBranchAsync(string repositoryPath, string branch, CancellationToken ct = default);
+
+    /// <summary>
+    /// Estagia todas as alterações (<c>add -A</c>) e commita com a mensagem informada
+    /// (via arquivo, preservando quebras de linha e caracteres especiais).
+    /// </summary>
+    Task<GitCommandResult> CommitAllAsync(string repositoryPath, string message, CancellationToken ct = default);
+
     /// <summary>
     /// Configura o <c>gh</c> como credential helper do git NESTE repositório (local),
     /// para que o <c>git push</c> em URLs HTTPS de <paramref name="host"/> (ex.:

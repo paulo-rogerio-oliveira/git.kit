@@ -436,6 +436,44 @@ public sealed class GitServiceTests
     }
 
     [Fact]
+    public async Task ProcessRunner_writes_standard_input_to_process()
+    {
+        // 'git hash-object --stdin' lê o stdin e imprime o hash do blob:
+        // para "hello\n" o hash é conhecido e determinístico.
+        var runner = new ProcessRunner();
+        var result = await runner.RunAsync("git", "hash-object --stdin", null, null, default, "hello\n");
+
+        Assert.True(result.Success, result.CombinedOutput);
+        Assert.Equal("ce013625030ba8dba906f756967f9e9ca394464a", result.StandardOutput.Trim());
+    }
+
+    [Fact]
+    public async Task CheckoutNewBranch_and_CommitAll_create_branch_and_commit()
+    {
+        using var repo = await TestRepository.CreateAsync();
+        await repo.CommitFileAsync("base.txt", "base", "base");
+
+        var git = NewService();
+
+        var checkout = await git.CheckoutNewBranchAsync(repo.Path, "us/1234");
+        Assert.True(checkout.Success, checkout.CombinedOutput);
+        var head = (await repo.RunRawAsync("rev-parse --abbrev-ref HEAD")).StandardOutput.Trim();
+        Assert.Equal("us/1234", head);
+
+        // Altera arquivos e commita tudo com mensagem multi-linha padrão do agente.
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "novo.txt"), "conteudo\n");
+        var message = "Ab#1234 implementa a validação de login\n\ndetalhes adicionais";
+        var commit = await git.CommitAllAsync(repo.Path, message);
+        Assert.True(commit.Success, commit.CombinedOutput);
+
+        var subject = (await repo.RunRawAsync("log -1 --format=%s")).StandardOutput.Trim();
+        Assert.Equal("Ab#1234 implementa a validação de login", subject);
+
+        var status = await repo.RunRawAsync("status --porcelain");
+        Assert.True(string.IsNullOrWhiteSpace(status.StandardOutput));
+    }
+
+    [Fact]
     public async Task ConfigureGhCredentialHelper_sets_local_helper_for_host()
     {
         using var repo = await TestRepository.CreateAsync();

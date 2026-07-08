@@ -19,7 +19,8 @@ public sealed class ProcessRunner : IProcessRunner
         string arguments,
         string? workingDirectory = null,
         Action<string>? onOutputLine = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? standardInput = null)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -28,11 +29,14 @@ public sealed class ProcessRunner : IProcessRunner
             WorkingDirectory = workingDirectory ?? Environment.CurrentDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            RedirectStandardInput = standardInput is not null,
             UseShellExecute = false,
             CreateNoWindow = true,
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
         };
+        if (standardInput is not null)
+            startInfo.StandardInputEncoding = new UTF8Encoding(false);
 
         // Garante mensagens do git em inglês/UTF-8 para parsing previsível.
         startInfo.Environment["LC_ALL"] = "C.UTF-8";
@@ -59,6 +63,20 @@ public sealed class ProcessRunner : IProcessRunner
 
         var stdoutTask = ReadStreamAsync(process.StandardOutput, stdout, onOutputLine);
         var stderrTask = ReadStreamAsync(process.StandardError, stderr, onOutputLine);
+
+        // Escreve o conteúdo no stdin e FECHA o stream (sinaliza EOF ao processo).
+        if (standardInput is not null)
+        {
+            try
+            {
+                await process.StandardInput.WriteAsync(standardInput).ConfigureAwait(false);
+                process.StandardInput.Close();
+            }
+            catch (IOException)
+            {
+                // Processo pode ter terminado antes de consumir o stdin — segue o fluxo.
+            }
+        }
 
         try
         {

@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Windows;
 using GitKit.App.ViewModels;
+using GitKit.Core.Data;
 using GitKit.Core.Models;
 using GitKit.Core.Services;
 
@@ -8,9 +9,10 @@ namespace GitKit.App.Services;
 
 /// <summary>
 /// Gerencia os processos (jobs) que rodam em background: clonagem + replicação de
-/// branch (com criação de PR) e cherry-pick de commits selecionados. Os jobs são
-/// mantidos apenas em memória durante a sessão. Em caso de conflito, o job fica
-/// "recuperável" — o usuário resolve no fluxo de conflitos atual e o job retoma.
+/// branch (com criação de PR), cherry-pick de commits selecionados e tasks de User
+/// Story executadas pelo agente (Claude CLI). Os jobs são mantidos em memória
+/// durante a sessão (o transcript do agente é persistido no SQLite). Em caso de
+/// conflito ou interação pendente, o job fica "recuperável" pela aba Processos.
 /// </summary>
 public sealed class BackgroundJobService
 {
@@ -20,6 +22,8 @@ public sealed class BackgroundJobService
     private readonly IRepositoryCache _cache;
     private readonly IDialogService _dialogs;
     private readonly ConflictResolutionCoordinator _coordinator;
+    private readonly IAgentRunner _agent;
+    private readonly AppDatabase _db;
 
     public BackgroundJobService(
         IGitService git,
@@ -27,7 +31,9 @@ public sealed class BackgroundJobService
         WorkspaceService workspace,
         IRepositoryCache cache,
         IDialogService dialogs,
-        ConflictResolutionCoordinator coordinator)
+        ConflictResolutionCoordinator coordinator,
+        IAgentRunner agent,
+        AppDatabase db)
     {
         _git = git;
         _gh = gh;
@@ -35,10 +41,20 @@ public sealed class BackgroundJobService
         _cache = cache;
         _dialogs = dialogs;
         _coordinator = coordinator;
+        _agent = agent;
+        _db = db;
     }
 
     /// <summary>Processos em background (mais recentes no topo), para a aba "Processos".</summary>
     public ObservableCollection<JobViewModel> Jobs { get; } = new();
+
+    /// <summary>
+    /// Disparado quando um job passa a exigir a atenção do dev (ex.: o agente
+    /// aguarda interação). O Shell usa para notificar (som + status).
+    /// </summary>
+    public event Action<JobViewModel>? JobNeedsAttention;
+
+    private void RaiseNeedsAttention(JobViewModel job) => JobNeedsAttention?.Invoke(job);
 
     // ----- Início dos jobs -----
 
@@ -292,6 +308,256 @@ public sealed class BackgroundJobService
             job.MarkFailed($"Cherry-pick concluído, mas o push para {job.PushUpstream} falhou:\n{push.CombinedOutput}");
     }
 
+    // ----- Task de US via agente (Claude CLI) -----
+
+    public JobViewModel StartAgentTask(
+        ResolvedRepositorySource source, string branch, WorkItem workItem, string technicalPlan)
+    {
+        var job = new JobViewModel(JobKind.AgentTask, $"US #{workItem.Id} — {workItem.Title}")
+        {
+            RepositoryUrl = source.CloneSource,
+            RemoteUrl = source.RemoteUrl,
+            IsLocalSource = source.IsLocal,
+            GhRepo = source.GhRepo,
+            NewBranch = branch.Trim(),
+            Mode = ReplicationMode.CherryPick,
+            WorkItemId = workItem.Id,
+            WorkItemTitle = workItem.Title,
+            SessionId = Guid.NewGuid().ToString("N"),
+        };
+
+        Register(job);
+        _ = Task.Run(() => RunAgentTaskAsync(job, workItem, technicalPlan));
+        return job;
+    }
+
+    private async Task RunAgentTaskAsync(JobViewModel job, WorkItem workItem, string technicalPlan)
+    {
+        var ct = job.Cts.Token;
+        try
+        {
+            job.MarkRunning("Verificando o CLI do agente...");
+            if (!await _agent.IsAvailableAsync(ct))
+            {
+                job.MarkFailed("CLI do agente (claude) não encontrado no PATH. Instale o Claude Code e autentique.");
+                return;
+            }
+
+            var repoPath = await CloneWorkingCopyAsync(job, ct);
+            if (repoPath is null)
+                return;
+
+            job.WorkingDir = repoPath;
+            job.NotifyPushTargetChanged();
+
+            job.MarkRunning($"Criando o branch '{job.NewBranch}'...");
+            var checkout = await _git.CheckoutNewBranchAsync(repoPath, job.NewBranch, ct);
+            if (!checkout.Success)
+            {
+                job.MarkFailed($"Não foi possível criar o branch '{job.NewBranch}':\n{checkout.CombinedOutput}");
+                return;
+            }
+
+            // Sessão persistida (transcript no SQLite).
+            _db.CreateSession(job.SessionId, workItem.Id, job.RepositoryUrl, job.NewBranch, repoPath, "Running");
+
+            var prompt = BuildInitialPrompt(workItem, technicalPlan);
+            await RunAgentTurnAsync(job, prompt, continueSession: false, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            job.MarkCanceled("Processo cancelado.");
+            TryUpdateSession(job, "Canceled");
+        }
+        catch (Exception ex)
+        {
+            job.MarkFailed("Erro inesperado: " + ex.Message);
+            TryUpdateSession(job, "Failed");
+        }
+    }
+
+    // Prompt inicial: dados da US + planejamento técnico do dev + regras de interação.
+    private static string BuildInitialPrompt(WorkItem workItem, string technicalPlan)
+        => $"""
+            Você é o agente de desenvolvimento do git.kit, trabalhando NESTE repositório
+            (já clonado, no branch de trabalho correto). Execute a task da User Story
+            abaixo seguindo o planejamento técnico do desenvolvedor.
+
+            ## User Story #{workItem.Id}: {workItem.Title}
+            Estado: {workItem.State}
+
+            {workItem.Description}
+
+            ## Planejamento técnico (do desenvolvedor)
+            {technicalPlan}
+
+            ## Regras
+            - Responda sempre em português.
+            - NÃO faça commit nem push: o git.kit cuidará disso após a aprovação do dev.
+            - Quando precisar de uma decisão ou informação do desenvolvedor, termine a
+              resposta com as perguntas claramente listadas.
+            - Ao final de cada resposta, resuma o que foi feito e o que falta.
+            """;
+
+    /// <summary>Executa um turno do agente e deixa o job aguardando a interação do dev.</summary>
+    private async Task RunAgentTurnAsync(JobViewModel job, string prompt, bool continueSession, CancellationToken ct)
+    {
+        job.AppendTranscript(continueSession ? "dev" : "sistema", prompt);
+        TryAppendMessage(job, continueSession ? "dev" : "sistema", prompt);
+
+        job.MarkRunning("Agente trabalhando... (a resposta aparece ao final do turno)");
+        var result = await _agent.RunTurnAsync(
+            job.WorkingDir, prompt, continueSession,
+            line => job.Report($"Agente: {Truncate(line, 120)}"), ct);
+
+        if (!result.Success)
+        {
+            job.MarkFailed("Falha ao executar o agente:\n" + result.CombinedOutput);
+            TryUpdateSession(job, "Failed");
+            return;
+        }
+
+        var reply = string.IsNullOrWhiteSpace(result.StandardOutput)
+            ? result.CombinedOutput
+            : result.StandardOutput.Trim();
+
+        job.AppendTranscript("agente", reply);
+        TryAppendMessage(job, "agente", reply);
+
+        job.MarkWaitingInput("O agente aguarda sua interação — abra o processo e responda.");
+        TryUpdateSession(job, "WaitingForInput");
+        RaiseNeedsAttention(job);
+    }
+
+    /// <summary>Envia uma mensagem do dev ao agente (continua a conversa da pasta).</summary>
+    public async Task SendToAgentAsync(JobViewModel job, string text)
+    {
+        if (job.Kind != JobKind.AgentTask || job.Status != JobStatus.WaitingForInput)
+            return;
+
+        try
+        {
+            await RunAgentTurnAsync(job, text, continueSession: true, job.Cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            job.MarkCanceled("Processo cancelado.");
+        }
+        catch (Exception ex)
+        {
+            job.MarkFailed("Erro ao interagir com o agente: " + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Pede ao agente UMA linha com a intenção das alterações e monta a mensagem de
+    /// commit padrão <c>Ab#{id} {intenção}</c> para aprovação do dev.
+    /// </summary>
+    public async Task RequestCommitAsync(JobViewModel job)
+    {
+        if (job.Kind != JobKind.AgentTask || job.Status != JobStatus.WaitingForInput)
+            return;
+
+        const string instruction =
+            "Conclua a task. Responda APENAS com uma única linha, sem prefixos nem pontuação final, " +
+            "que expresse a intenção das alterações realizadas (será usada na mensagem de commit).";
+
+        try
+        {
+            var ct = job.Cts.Token;
+            job.AppendTranscript("sistema", instruction);
+            TryAppendMessage(job, "sistema", instruction);
+
+            job.MarkRunning("Solicitando ao agente a intenção das alterações...");
+            var result = await _agent.RunTurnAsync(job.WorkingDir, instruction, continueSession: true, null, ct);
+            if (!result.Success)
+            {
+                job.MarkWaitingInput("Falha ao obter a intenção do agente:\n" + result.CombinedOutput);
+                return;
+            }
+
+            var intent = result.StandardOutput
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(l => l.Trim())
+                .LastOrDefault(l => l.Length > 0) ?? "alterações da task";
+
+            job.AppendTranscript("agente", intent);
+            TryAppendMessage(job, "agente", intent);
+
+            job.ProposedCommitMessage = $"Ab#{job.WorkItemId} {intent}";
+            job.MarkWaitingInput("Mensagem de commit proposta — revise e aprove para commitar.");
+            RaiseNeedsAttention(job);
+        }
+        catch (OperationCanceledException)
+        {
+            job.MarkCanceled("Processo cancelado.");
+        }
+        catch (Exception ex)
+        {
+            job.MarkFailed("Erro ao solicitar o commit: " + ex.Message);
+        }
+    }
+
+    /// <summary>Após a aprovação do dev: commita tudo e habilita o push.</summary>
+    public async Task<bool> ApproveCommitAsync(JobViewModel job, string message)
+    {
+        if (job.Kind != JobKind.AgentTask || string.IsNullOrWhiteSpace(message))
+            return false;
+
+        try
+        {
+            var ct = job.Cts.Token;
+            job.MarkRunning("Commitando as alterações...");
+            var commit = await _git.CommitAllAsync(job.WorkingDir, message.Trim(), ct);
+            if (!commit.Success)
+            {
+                job.MarkWaitingInput("Falha no commit:\n" + commit.CombinedOutput);
+                return false;
+            }
+
+            TryAppendMessage(job, "sistema", $"Commit aprovado: {message.Trim()}");
+            job.MarkReadyToPush("Commit realizado. Pronto para enviar (push).");
+            TryUpdateSession(job, "ReadyToPush");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            job.MarkFailed("Erro ao commitar: " + ex.Message);
+            return false;
+        }
+    }
+
+    private async Task FinishAgentAsync(JobViewModel job, CancellationToken ct)
+    {
+        job.MarkRunning($"Enviando '{job.NewBranch}' para {job.PushUpstream}...");
+        var push = await _git.PushAsync(job.WorkingDir, job.NewBranch, ct: ct);
+        if (push.Success)
+        {
+            job.MarkCompleted($"Branch '{job.NewBranch}' enviado para {job.PushUpstream}.\n{push.CombinedOutput}".TrimEnd());
+            TryUpdateSession(job, "Completed");
+        }
+        else
+        {
+            job.MarkFailed($"Falha no push para {job.PushUpstream}:\n{push.CombinedOutput}");
+        }
+    }
+
+    // Persistência best-effort do transcript/sessão (não interrompe o fluxo).
+    private void TryAppendMessage(JobViewModel job, string role, string text)
+    {
+        try { _db.AppendMessage(job.SessionId, role, text); } catch { }
+    }
+
+    private void TryUpdateSession(JobViewModel job, string status)
+    {
+        if (string.IsNullOrEmpty(job.SessionId))
+            return;
+        try { _db.UpdateSessionStatus(job.SessionId, status); } catch { }
+    }
+
+    private static string Truncate(string text, int max)
+        => text.Length <= max ? text : text[..max] + "…";
+
     // ----- Recuperação / retomada -----
 
     /// <summary>Resultado de um passo de recuperação dirigido pela tela de resolução.</summary>
@@ -306,6 +572,13 @@ public sealed class BackgroundJobService
     /// </summary>
     public async Task RecoverAsync(JobViewModel job)
     {
+        // Job de agente: popup próprio (console de interação com o Claude CLI).
+        if (job.Kind == JobKind.AgentTask)
+        {
+            _dialogs.ShowAgent(new AgentSessionViewModel(this, job));
+            return;
+        }
+
         var conflicts = job.Status == JobStatus.NeedsConflictResolution && !string.IsNullOrWhiteSpace(job.WorkingDir)
             ? await _git.GetConflictsAsync(job.WorkingDir)
             : (IReadOnlyList<ConflictEntry>)Array.Empty<ConflictEntry>();
@@ -363,10 +636,18 @@ public sealed class BackgroundJobService
         var ct = job.Cts.Token;
         try
         {
-            if (job.Kind == JobKind.BranchReplication)
-                await FinishBranchReplicationAsync(job, ct);
-            else
-                await FinishCherryPickAsync(job, ct);
+            switch (job.Kind)
+            {
+                case JobKind.BranchReplication:
+                    await FinishBranchReplicationAsync(job, ct);
+                    break;
+                case JobKind.AgentTask:
+                    await FinishAgentAsync(job, ct);
+                    break;
+                default:
+                    await FinishCherryPickAsync(job, ct);
+                    break;
+            }
         }
         catch (OperationCanceledException)
         {

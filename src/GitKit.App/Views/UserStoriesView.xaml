@@ -1,0 +1,158 @@
+<UserControl x:Class="GitKit.App.Views.UserStoriesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Configurações (DevOps + agente) -->
+        <Expander Grid.Row="0" Header="Configurações (Azure DevOps e agente)" Margin="0,0,0,10">
+            <GroupBox Header="Acesso" Margin="0,6,0,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="16" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="16" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,0,8">
+                        <Label Content="Organização (https://dev.azure.com/org)" />
+                        <TextBox Text="{Binding OrgUrl, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+                    <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,0,0,8">
+                        <Label Content="Projeto" />
+                        <TextBox Text="{Binding Project, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+                    <StackPanel Grid.Row="0" Grid.Column="4" Margin="0,0,0,8">
+                        <Label Content="E-mail do desenvolvedor" />
+                        <TextBox Text="{Binding UserEmail, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,0,0,8">
+                        <Label Content="PAT (Personal Access Token — escopo Work Items read/write)" />
+                        <TextBox Text="{Binding Pat, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+                    <StackPanel Grid.Row="1" Grid.Column="4" Margin="0,0,0,8">
+                        <Label Content="Executável do agente" />
+                        <TextBox Text="{Binding AgentExecutable, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,0,0,4">
+                        <Label Content="Permission mode (acceptEdits/bypassPermissions)" />
+                        <TextBox Text="{Binding AgentPermissionMode, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+                    <StackPanel Grid.Row="2" Grid.Column="2" Margin="0,0,0,4">
+                        <Label Content="Args extras do agente (opcional)" />
+                        <TextBox Text="{Binding AgentExtraArgs, UpdateSourceTrigger=PropertyChanged}" />
+                    </StackPanel>
+                    <Button Grid.Row="2" Grid.Column="4" Content="Salvar configurações"
+                            VerticalAlignment="Bottom" HorizontalAlignment="Left"
+                            Command="{Binding SaveSettingsCommand}" />
+                </Grid>
+            </GroupBox>
+        </Expander>
+
+        <!-- Lista + detalhe -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="16" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- User stories -->
+            <GroupBox Grid.Column="0" Header="User Stories (minhas tasks + sem responsável)">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Button Grid.Row="0" Content="Carregar" HorizontalAlignment="Left" Margin="0,0,0,10"
+                            Style="{StaticResource PrimaryButton}" Command="{Binding LoadCommand}" />
+
+                    <DataGrid Grid.Row="1" ItemsSource="{Binding Stories}" SelectedItem="{Binding SelectedStory}">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Id" Binding="{Binding Id}" Width="60" />
+                            <DataGridTextColumn Header="Título" Binding="{Binding Title}" Width="*" />
+                            <DataGridTextColumn Header="Estado" Binding="{Binding State}" Width="70" />
+                            <DataGridTextColumn Header="Responsável" Binding="{Binding AssignedToDisplay}" Width="120" />
+                            <DataGridTextColumn Header="Origem" Binding="{Binding Category}" Width="110" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </GroupBox>
+
+            <!-- Detalhe: plano técnico + execução -->
+            <GroupBox Grid.Column="2" Header="Planejamento e execução" IsEnabled="{Binding HasSelection}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Style="{StaticResource Typo.Caption}" Margin="0,0,0,8"
+                               TextWrapping="Wrap" MaxHeight="64" TextTrimming="CharacterEllipsis"
+                               Text="{Binding SelectedDescription}" />
+
+                    <Button Grid.Row="1" Content="Atribuir a mim" HorizontalAlignment="Left" Margin="0,0,0,10"
+                            Command="{Binding AssignCommand}"
+                            ToolTip="Atribui a US a você, cria uma Task filha em seu nome e a coloca em Active." />
+
+                    <StackPanel Grid.Row="2" Margin="0,0,0,10">
+                        <Label Content="Planejamento técnico (insumo do agente)" />
+                        <TextBox AcceptsReturn="True" TextWrapping="Wrap" MinHeight="140"
+                                 VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"
+                                 Height="Auto"
+                                 Text="{Binding TechnicalPlan}" />
+                    </StackPanel>
+
+                    <Grid Grid.Row="3" Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="2*" />
+                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0">
+                            <Label Content="Repositório (URL GitHub ou caminho local)" />
+                            <ComboBox ItemsSource="{Binding RepositoriesView}"
+                                      IsEditable="True" IsTextSearchEnabled="False" StaysOpenOnEdit="True"
+                                      Text="{Binding RepositorySource, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <Label Content="Branch" />
+                            <TextBox Text="{Binding BranchName, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Button Grid.Row="4" Content="Executar com o agente" MinWidth="180" HorizontalAlignment="Left"
+                            Style="{StaticResource PrimaryButton}" Command="{Binding ExecuteCommand}"
+                            ToolTip="Clona o repositório, cria o branch e executa o planejamento com o Claude (CLI). Acompanhe pela aba Processos." />
+                </Grid>
+            </GroupBox>
+        </Grid>
+
+        <!-- Status -->
+        <TextBlock Grid.Row="2" Margin="2,10,0,0" Style="{StaticResource Typo.Caption}"
+                   Text="{Binding StatusMessage}" />
+    </Grid>
+</UserControl>

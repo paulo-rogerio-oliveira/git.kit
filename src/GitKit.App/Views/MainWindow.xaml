@@ -27,6 +27,10 @@
                 <views:CherryPickView DataContext="{Binding CherryPick}" Margin="0,10,0,0" />
             </TabItem>
 
+            <TabItem Header="User Stories">
+                <views:UserStoriesView DataContext="{Binding UserStories}" Margin="0,10,0,0" />
+            </TabItem>
+
             <TabItem Header="Processos">
                 <views:ProcessesView DataContext="{Binding Processes}" Margin="0,10,0,0" />
             </TabItem>
@@ -52,6 +56,10 @@
         <StatusBar Grid.Row="1" Margin="0,8,0,0">
             <StatusBarItem>
                 <TextBlock Style="{StaticResource Typo.Caption}" Text="{Binding Processes.Summary}" />
+            </StatusBarItem>
+            <StatusBarItem>
+                <TextBlock Style="{StaticResource Typo.Caption}" Foreground="{StaticResource AccentBrush}"
+                           Text="{Binding AttentionMessage}" />
             </StatusBarItem>
         </StatusBar>
     </Grid>
